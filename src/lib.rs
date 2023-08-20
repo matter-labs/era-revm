@@ -1,4 +1,5 @@
 use std::{
+    collections::{HashMap, HashSet},
     fmt::Debug,
     str::FromStr,
     sync::{Arc, Mutex, RwLock},
@@ -11,8 +12,8 @@ use era_test_node::{
 };
 use revm::{
     primitives::{
-        ruint::Uint, Account, AccountInfo, Bytes, EVMResult, Env, Eval, ExecutionResult, HashMap,
-        ResultAndState, StorageSlot, TxEnv, B160, B256,
+        ruint::Uint, Account, AccountInfo, Bytecode, Bytes, EVMResult, Env, Eval, ExecutionResult,
+        HashMap as rHashMap, ResultAndState, StorageSlot, TxEnv, B160, B256,
     },
     Database, Inspector,
 };
@@ -108,6 +109,10 @@ fn u256_to_h256(i: U256) -> H256 {
     H256::from_slice(&bytes)
 }
 
+fn h256_to_revm_u256(i: H256) -> revmU256 {
+    u256_to_revm_u256(h256_to_u256(i))
+}
+
 pub struct RevmDatabaseForEra<DB> {
     pub db: Arc<Mutex<Box<DB>>>,
 }
@@ -159,6 +164,11 @@ where
     fn get_bytecode_by_hash(&self, hash: H256) -> Option<Vec<u8>> {
         let mut db = self.db.lock().unwrap();
         let result = db.code_by_hash(h256_to_b256(hash)).unwrap();
+        println!(
+            "Getting bytecode hash for {:?} size: {:?}",
+            hash,
+            result.bytecode.len()
+        );
         Some(result.bytecode.to_vec())
     }
 
@@ -236,7 +246,14 @@ pub fn hash_bytecode(code: &[u8]) -> H256 {
     H256(hash)
 }
 
-pub fn tx_env_to_era_tx(tx_env: TxEnv) -> L2Tx {
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
+pub struct PackedEraBytecode {
+    pub hash: String,
+    pub bytecode: String,
+    pub factory_deps: Vec<String>,
+}
+
+pub fn tx_env_to_era_tx(tx_env: TxEnv, nonce: u64) -> L2Tx {
     println!(
         "Creating transaction with nonce: {:?} from: {:?}",
         tx_env.nonce, tx_env.caller
@@ -245,7 +262,7 @@ pub fn tx_env_to_era_tx(tx_env: TxEnv) -> L2Tx {
         revm::primitives::TransactTo::Call(contract_address) => L2Tx::new(
             contract_address.as_fixed_bytes().into(),
             tx_env.data.to_vec(),
-            (tx_env.nonce.unwrap_or_default() as u32).into(),
+            (tx_env.nonce.unwrap_or(nonce) as u32).into(),
             Fee {
                 gas_limit: limit_gas_more(tx_env.gas_limit.into()),
                 max_fee_per_gas: good_max_fee_per_gas(U256::from_little_endian(
@@ -263,14 +280,33 @@ pub fn tx_env_to_era_tx(tx_env: TxEnv) -> L2Tx {
         ),
         revm::primitives::TransactTo::Create(scheme) => {
             println!("Deploy - scheme is {:?}", scheme);
-            let bytecode = tx_env.data.to_vec();
+
+            let packed_bytecode: PackedEraBytecode =
+                serde_json::from_slice(&tx_env.data.to_vec()).unwrap();
+
+            //let packed_bytecodes = serde_json tx_env.data.to_vec();
+
+            let bytecode = hex::decode(packed_bytecode.bytecode.clone()).unwrap();
             let bytecode_hash = hash_bytecode(&bytecode);
+            let factory_deps: Vec<Vec<u8>> = packed_bytecode
+                .factory_deps
+                .iter()
+                .chain([&packed_bytecode.bytecode])
+                .map(|entry| hex::decode(entry).unwrap())
+                .collect();
+
+            assert_eq!(
+                bytecode_hash,
+                H256::from_str(&packed_bytecode.hash).unwrap()
+            );
+            println!("DEPLOY - factory deps length: {:?}", factory_deps.len());
+
             L2Tx::new(
                 H160::from_low_u64_be(0x8006),
                 // TODO: wrap tx_env.data !!
                 encode_deploy_params_create(Default::default(), bytecode_hash, Default::default()),
                 //tx_env.data.to_vec(),
-                (tx_env.nonce.unwrap_or_default() as u32).into(),
+                (tx_env.nonce.unwrap_or(nonce) as u32).into(),
                 Fee {
                     gas_limit: limit_gas_more(tx_env.gas_limit.into()),
                     max_fee_per_gas: good_max_fee_per_gas(U256::from_little_endian(
@@ -283,7 +319,7 @@ pub fn tx_env_to_era_tx(tx_env: TxEnv) -> L2Tx {
                 },
                 tx_env.caller.as_fixed_bytes().into(),
                 U256::from_little_endian(tx_env.value.as_le_slice()),
-                Some(vec![bytecode]), // factory_deps
+                Some(factory_deps), // factory_deps
                 PaymasterParams::default(),
             )
         }
@@ -309,9 +345,69 @@ fn set_min_l1_gas_price(l1_gas_price: u64) -> u64 {
     }
 }
 
+pub fn h256_to_h160(i: &H256) -> H160 {
+    H160::from_slice(&i.0[12..32])
+}
+
+pub fn fetch_account_code<DB: Database>(
+    account: H160,
+    db: &mut DB,
+    modified_keys: &HashMap<StorageKey, H256>,
+    bytecodes: &HashMap<U256, Vec<U256>>,
+) -> Option<Bytecode> {
+    // First - check if the bytecode was set/changed in the recent block.
+
+    let account_code_storage =
+        b160_to_h160(B160::from_str("0x0000000000000000000000000000000000008002").unwrap());
+
+    for (k, v) in modified_keys.iter() {
+        // If there was a change in 'AccountCodeStorage' system contract.
+        if k.account().address() == &account_code_storage && h256_to_h160(k.key()) == account {
+            let new_bytecode_hash = v.clone();
+            let new_bytecode = bytecodes.get(&h256_to_u256(new_bytecode_hash)).unwrap();
+            let u8_bytecode: Vec<u8> = new_bytecode
+                .iter()
+                .flat_map(|x| u256_to_h256(x.clone()).to_fixed_bytes())
+                //.cloned()
+                .collect();
+
+            return Some(Bytecode {
+                bytecode: Bytes::copy_from_slice(&u8_bytecode.as_slice()),
+                hash: h256_to_b256(new_bytecode_hash),
+                state: revm::primitives::BytecodeState::Raw,
+            });
+        }
+    }
+
+    // this is super stupid and slow
+    for (k, v) in bytecodes {
+        if h256_to_h160(&u256_to_h256(k.clone())) == account {
+            let u8_bytecode: Vec<u8> = v
+                .iter()
+                .flat_map(|x| u256_to_h256(x.clone()).to_fixed_bytes())
+                //.cloned()
+                .collect();
+
+            return Some(Bytecode {
+                bytecode: Bytes::copy_from_slice(&u8_bytecode.as_slice()),
+                hash: h256_to_b256(u256_to_h256(*k)),
+                state: revm::primitives::BytecodeState::Raw,
+            });
+        }
+    }
+
+    let b160_account = h160_to_b160(account);
+
+    db.basic(b160_account)
+        .ok()
+        .map(|db_account| db_account.map(|x| x.code))
+        .flatten()
+        .flatten()
+}
+
 pub fn run_era_transaction<'a, DB, E, INSP>(
     env: &Env,
-    db: DB,
+    db: &mut DB,
     inspector: INSP, //    db: &dyn Database<Error = DatabaseError>,
                      //    inspector: &mut dyn Inspector<dyn Database<Error = DatabaseError>>,
 ) -> EVMResult<E>
@@ -323,13 +419,51 @@ where
     // TODO: pass stuff from block env (block number etc) into fork.
 
     let foo = Arc::new(Mutex::new(Box::new(db)));
-    let bar = RevmDatabaseForEra { db: foo };
+    let mut bar = RevmDatabaseForEra { db: foo };
+
+    let num_and_ts = bar
+        .get_storage_at(
+            H160::from_str("0x000000000000000000000000000000000000800b").unwrap(),
+            U256::from(7),
+            None,
+        )
+        .unwrap();
+
+    let bb = num_and_ts.as_fixed_bytes();
+    let num: [u8; 8] = bb[24..32].try_into().unwrap();
+    let ts: [u8; 8] = bb[8..16].try_into().unwrap();
+
+    let num = u64::from_be_bytes(num);
+    let ts = u64::from_be_bytes(ts);
+
+    // FIXME: replace with proper call to fetch current nonce for account.
+    let nonce_storage = bar
+        .get_storage_at(
+            H160::from_str("0x0000000000000000000000000000000000008003").unwrap(),
+            U256::from_str("0x3e1a6e48cd7e8291e25c14adac8306b064f909d041e2dc71d7bda438c8681263")
+                .unwrap(),
+            None,
+        )
+        .unwrap();
+
+    let nonces: [u8; 8] = nonce_storage.as_fixed_bytes()[24..32].try_into().unwrap();
+
+    let nonces = u64::from_be_bytes(nonces);
+
+    println!(
+        "*** Starting ERA transaction: block: {:?} timestamp: {:?} - but using {:?} and {:?} instead with nonce {:?}",
+        env.block.number.to::<u32>(),
+        env.block.timestamp.to::<u64>(),
+        num,
+        ts,
+        nonces
+    );
 
     let fork_details = ForkDetails {
         fork: &bar,
-        l1_block: L1BatchNumber(env.block.number.to::<u32>() - 1), // HACK
-        l2_miniblock: env.block.number.to::<u64>() - 1,
-        block_timestamp: env.block.timestamp.to::<u64>(),
+        l1_block: L1BatchNumber(num as u32), //L1BatchNumber(env.block.number.to::<u32>() - 1), // HACK
+        l2_miniblock: num,                   //env.block.number.to::<u64>() - 1,
+        block_timestamp: ts,                 //env.block.timestamp.to::<u64>(),
         overwrite_chain_id: Some(L2ChainId(env.cfg.chain_id.to::<u16>())),
         l1_gas_price: set_min_l1_gas_price(env.block.basefee.to::<u64>()),
     };
@@ -337,7 +471,7 @@ where
     let node = InMemoryNode::new(Some(fork_details), ShowCalls::All, false, false);
 
     // TODO: get nonce on your own (from the database).
-    let l2_tx = tx_env_to_era_tx(env.tx.clone());
+    let l2_tx = tx_env_to_era_tx(env.tx.clone(), nonces);
 
     let era_execution_result = node.run_l2_tx_for_revm(l2_tx).unwrap();
 
@@ -377,34 +511,84 @@ where
         }
     }
 
-    let state = account_to_keys
+    // List of touched accounts
+    let mut accounts_touched: HashSet<H160> = Default::default();
+    // All accounts where storage was modified.
+    for x in account_to_keys.keys() {
+        accounts_touched.insert(x.clone());
+    }
+    // Also insert 'fake' accoutnts for bytecodes (to make sure that factory bytecodes get persisted).
+    for (k, _) in &bytecodes {
+        accounts_touched.insert(h256_to_h160(&u256_to_h256(*k)));
+    }
+
+    let account_code_storage =
+        b160_to_h160(B160::from_str("0x0000000000000000000000000000000000008002").unwrap());
+    // FIXME: also load stuff from database somehow.
+
+    if let Some(account_bytecodes) = account_to_keys.get(&account_code_storage) {
+        for (k, v) in account_bytecodes {
+            let account_address = H160::from_slice(&k.key().0[12..32]);
+            accounts_touched.insert(account_address);
+        }
+    }
+
+    println!("Touched accounts:");
+    for x in &accounts_touched {
+        println!("  {:?}", x);
+    }
+
+    let state: rHashMap<B160, Account> = accounts_touched
         .iter()
-        .map(|(address, slot_changes)| {
-            let storage = slot_changes
-                .iter()
-                .map(|(slot, value)| {
-                    (
-                        revm::primitives::U256::from_le_bytes(slot.key().0),
-                        StorageSlot {
-                            original_value: revm::primitives::U256::ZERO, // FIXME
-                            present_value: revm::primitives::U256::from_le_bytes(
-                                value.to_fixed_bytes(),
-                                // TODO: verify endianness
-                            ),
-                        },
-                    )
-                })
-                .collect();
+        .map(|account| {
+            let account_b160: B160 = h160_to_b160(*account);
+
+            let storage: Option<rHashMap<revmU256, StorageSlot>> =
+                account_to_keys.get(account).map(|slot_changes| {
+                    slot_changes
+                        .iter()
+                        .map(|(slot, value)| {
+                            (
+                                h256_to_revm_u256(*slot.key()),
+                                StorageSlot {
+                                    original_value: revm::primitives::U256::ZERO, // FIXME
+                                    present_value: h256_to_revm_u256(*value),
+                                },
+                            )
+                        })
+                        .collect()
+                });
+            let mut mm = bar.db.lock().unwrap();
+
+            let account_code = fetch_account_code(
+                account.clone(),
+                &mut mm.as_mut(),
+                &modified_keys,
+                &bytecodes,
+            );
+
+            if let Some(account_code) = &account_code {
+                println!(
+                    "Setting accoutn code for {:?} hash: {:?} len {:?}",
+                    account,
+                    account_code.hash,
+                    account_code.bytes().len()
+                );
+            }
+
             (
-                B160::from(address.0),
+                account_b160,
                 Account {
                     info: AccountInfo {
                         balance: revm::primitives::U256::ZERO, // FIXME
                         nonce: 1,                              // FIXME
-                        code_hash: B256::zero(),               // FIXME
-                        code: None,
+                        code_hash: account_code
+                            .as_ref()
+                            .map(|x| x.hash().clone())
+                            .unwrap_or_default(), // FIXME
+                        code: account_code,
                     },
-                    storage,
+                    storage: storage.unwrap_or_default(),
                     storage_cleared: false,
                     is_destroyed: false,
                     is_touched: true,

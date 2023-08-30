@@ -513,7 +513,12 @@ where
                 ),
             }
         }
-        zksync_types::tx::tx_execution_info::TxExecutionStatus::Failure => todo!(),
+        zksync_types::tx::tx_execution_info::TxExecutionStatus::Failure => {
+            ExecutionResult::Revert {
+                gas_used: env.tx.gas_limit - tx_result.gas_refunded as u64,
+                output: Bytes::new(), // FIXME (function results)
+            }
+        }
     };
     //let state: State= Default::default();
 

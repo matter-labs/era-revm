@@ -1,20 +1,23 @@
+pub mod conversion_utils;
+
 use std::{
     collections::{HashMap, HashSet},
     fmt::Debug,
     str::FromStr,
-    sync::{Arc, Mutex, RwLock},
+    sync::{Arc, Mutex},
 };
 
+use conversion_utils::{b160_to_h160, h256_to_b256};
 use era_test_node::{
     fork::{ForkDetails, ForkSource},
     node::InMemoryNode,
 };
 use revm::{
     primitives::{
-        ruint::Uint, Account, AccountInfo, Bytecode, Bytes, EVMResult, Env, Eval, ExecutionResult,
+        Account, AccountInfo, Bytecode, Bytes, EVMResult, Env, Eval, ExecutionResult,
         HashMap as rHashMap, ResultAndState, StorageSlot, TxEnv, B160, B256,
     },
-    Database, Inspector,
+    Database,
 };
 use vm::vm::VmTxExecutionResult;
 use zksync_basic_types::{
@@ -29,15 +32,11 @@ use zksync_types::{
 };
 
 use revm::primitives::U256 as revmU256;
-use zksync_utils::h256_to_account_address;
+use zksync_utils::{h256_to_account_address, h256_to_u256, u256_to_h256};
 
-fn b160_to_h160(i: B160) -> H160 {
-    i.as_fixed_bytes().into()
-}
-
-fn h160_to_b160(i: H160) -> B160 {
-    i.as_fixed_bytes().into()
-}
+use crate::conversion_utils::{
+    h160_to_b160, h256_to_revm_u256, revm_u256_to_h256, u256_to_revm_u256,
+};
 
 fn contract_address_from_tx_result(execution_result: &VmTxExecutionResult) -> Option<H160> {
     for query in execution_result.result.logs.storage_logs.iter().rev() {
@@ -48,82 +47,6 @@ fn contract_address_from_tx_result(execution_result: &VmTxExecutionResult) -> Op
         }
     }
     None
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    #[test]
-    fn test_160_conversion() {
-        let b = B160::from_str("0x000000000000000000000000000000000000800b").unwrap();
-        let h = b160_to_h160(b);
-        assert_eq!(h.to_string(), "0x0000…800b");
-        let b2 = h160_to_b160(h);
-        assert_eq!(b, b2);
-    }
-
-    #[test]
-    fn test_256_conversion() {
-        let h =
-            H256::from_str("0xb99acb716b354b9be88d3eaba99ad36792ccdd4349404cbb812adf0b0b14d601")
-                .unwrap();
-        let b = h256_to_b256(h);
-        assert_eq!(b.to_string(), "0xb99a…d601");
-        let u = h256_to_u256(h);
-        assert_eq!(
-            u.to_string(),
-            "83951375548152864551218308881540843734370423742152710934930688330188941743617"
-        );
-
-        let revm_u = u256_to_revm_u256(u);
-        assert_eq!(
-            revm_u.to_string(),
-            "83951375548152864551218308881540843734370423742152710934930688330188941743617"
-        );
-        assert_eq!(u, revm_u256_to_u256(revm_u));
-
-        assert_eq!(h, revm_u256_to_h256(revm_u));
-
-        assert_eq!(h, u256_to_h256(u));
-    }
-}
-
-fn u256_to_b256(i: U256) -> B256 {
-    let mut payload: [u8; 32] = [0; 32];
-    i.to_big_endian(&mut payload);
-    B256::from_slice(&payload)
-}
-
-fn u256_to_revm_u256(i: U256) -> revmU256 {
-    let mut payload: [u8; 32] = [0; 32];
-    i.to_big_endian(&mut payload);
-    revmU256::from_be_bytes(payload)
-}
-
-fn revm_u256_to_u256(i: revmU256) -> U256 {
-    U256::from_big_endian(&i.to_be_bytes::<32>())
-}
-
-fn revm_u256_to_h256(i: revmU256) -> H256 {
-    i.to_be_bytes::<32>().into()
-}
-
-fn h256_to_b256(i: H256) -> B256 {
-    i.to_fixed_bytes().into()
-}
-
-fn h256_to_u256(i: H256) -> U256 {
-    i.to_fixed_bytes().into()
-}
-fn u256_to_h256(i: U256) -> H256 {
-    let mut bytes = [0u8; 32];
-    i.to_big_endian(&mut bytes);
-    H256::from_slice(&bytes)
-}
-
-fn h256_to_revm_u256(i: H256) -> revmU256 {
-    u256_to_revm_u256(h256_to_u256(i))
 }
 
 pub struct RevmDatabaseForEra<DB> {

@@ -7,12 +7,31 @@ edition = "2021"
 
 [dependencies]
 
-revm = { path = "../revm/crates/revm" }
+#revm = { path = "../revm/crates/revm" }
+revm = { git = "https://github.com/mm-zk/revm.git", branch = "release_v25_with_old_sha" }
+#revm = { version = "2.3", default-features = false, features = [
+#  "std",
+#  "k256",
+#  "with-serde",
+#  "memory_limit",
+#  "optional_eip3607"
+#] }
+
 era_test_node = { path = "../era-test-node"}
-zksync_basic_types = {path = "../zksync-era/core/lib/basic_types"}
-zksync_types = {path = "../zksync-era/core/lib/types"}
+# era_test_node = {git = "https://github.com/matter-labs/era-test-node.git", branch = "main"}
+
+# zksync_basic_types = {path = "../zksync-era/core/lib/basic_types"}
+zksync_basic_types = { git = "https://github.com/matter-labs/zksync-era.git", rev = "a98e454221da7d6ecad9b317cf44b0786e819659" }
+
+#zksync_types = {path = "../zksync-era/core/lib/types"}
+zksync_types = { git = "https://github.com/matter-labs/zksync-era.git", rev = "a98e454221da7d6ecad9b317cf44b0786e819659" }
+vm = { git = "https://github.com/matter-labs/zksync-era.git", rev = "a98e454221da7d6ecad9b317cf44b0786e819659" }
+zksync_utils = { git = "https://github.com/matter-labs/zksync-era.git", rev = "a98e454221da7d6ecad9b317cf44b0786e819659" }
+
+
 ethabi = "18.0.0"
 zk_evm = {git = "https://github.com/matter-labs/era-zk_evm.git", branch = "v1.3.3"}
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 hex = "0.4"
+eyre = "0.6"

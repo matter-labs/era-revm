@@ -6,9 +6,8 @@ use std::{
 };
 
 use era_test_node::{
-    fork::{ForkDetails, RemoteForkProvider},
-    node::{contract_address_from_tx_result, InMemoryNode},
-    L2Tx, ShowCalls,
+    fork::{ForkDetails, ForkSource},
+    node::InMemoryNode,
 };
 use revm::{
     primitives::{
@@ -17,17 +16,20 @@ use revm::{
     },
     Database, Inspector,
 };
+use vm::vm::VmTxExecutionResult;
 use zksync_basic_types::{
     web3::signing::keccak256, L1BatchNumber, L2ChainId, MiniblockNumber, H160, H256, U256,
 };
 use zksync_types::{
     api::{BlockIdVariant, Transaction},
     fee::Fee,
+    l2::L2Tx,
     transaction_request::PaymasterParams,
-    StorageKey,
+    StorageKey, StorageLogQueryType, ACCOUNT_CODE_STORAGE_ADDRESS,
 };
 
 use revm::primitives::U256 as revmU256;
+use zksync_utils::h256_to_account_address;
 
 fn b160_to_h160(i: B160) -> H160 {
     i.as_fixed_bytes().into()
@@ -35,6 +37,17 @@ fn b160_to_h160(i: B160) -> H160 {
 
 fn h160_to_b160(i: H160) -> B160 {
     i.as_fixed_bytes().into()
+}
+
+fn contract_address_from_tx_result(execution_result: &VmTxExecutionResult) -> Option<H160> {
+    for query in execution_result.result.logs.storage_logs.iter().rev() {
+        if query.log_type == StorageLogQueryType::InitialWrite
+            && query.log_query.address == ACCOUNT_CODE_STORAGE_ADDRESS
+        {
+            return Some(h256_to_account_address(&u256_to_h256(query.log_query.key)));
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -125,7 +138,7 @@ impl<DB> Debug for RevmDatabaseForEra<DB> {
     }
 }
 
-impl<DB: Database + Send> RemoteForkProvider for RevmDatabaseForEra<DB>
+impl<DB: Database + Send> ForkSource for &RevmDatabaseForEra<DB>
 where
     <DB as revm::Database>::Error: Debug,
 {
@@ -134,7 +147,7 @@ where
         address: H160,
         idx: U256,
         block: Option<BlockIdVariant>,
-    ) -> Option<H256> {
+    ) -> eyre::Result<H256> {
         let l2_token = H160::from_str("0x000000000000000000000000000000000000800a").unwrap();
         // Only top block is supported.
         // FIXME
@@ -151,17 +164,17 @@ where
             println!("Faking L2 token");
         }
         println!("Got result: {:?}", result);
-        Some(result)
+        Ok(result)
     }
 
     fn get_raw_block_transactions(
         &self,
         block_number: MiniblockNumber,
-    ) -> Option<Vec<zksync_types::Transaction>> {
+    ) -> eyre::Result<Vec<zksync_types::Transaction>> {
         todo!()
     }
 
-    fn get_bytecode_by_hash(&self, hash: H256) -> Option<Vec<u8>> {
+    fn get_bytecode_by_hash(&self, hash: H256) -> eyre::Result<Option<Vec<u8>>> {
         let mut db = self.db.lock().unwrap();
         let result = db.code_by_hash(h256_to_b256(hash)).unwrap();
         println!(
@@ -169,10 +182,10 @@ where
             hash,
             result.bytecode.len()
         );
-        Some(result.bytecode.to_vec())
+        Ok(Some(result.bytecode.to_vec()))
     }
 
-    fn get_transaction_by_hash(&self, hash: H256) -> Option<Transaction> {
+    fn get_transaction_by_hash(&self, hash: H256) -> eyre::Result<Option<Transaction>> {
         todo!()
     }
 }
@@ -421,15 +434,13 @@ where
     let foo = Arc::new(Mutex::new(Box::new(db)));
     let mut bar = RevmDatabaseForEra { db: foo };
 
-    let num_and_ts = bar
-        .get_storage_at(
-            H160::from_str("0x000000000000000000000000000000000000800b").unwrap(),
-            U256::from(7),
-            None,
-        )
-        .unwrap();
-
-    let bb = num_and_ts.as_fixed_bytes();
+    let num_and_ts = (&bar).get_storage_at(
+        H160::from_str("0x000000000000000000000000000000000000800b").unwrap(),
+        U256::from(7),
+        None,
+    );
+    let ab1 = num_and_ts.unwrap();
+    let bb = ab1.as_fixed_bytes();
     let num: [u8; 8] = bb[24..32].try_into().unwrap();
     let ts: [u8; 8] = bb[8..16].try_into().unwrap();
 
@@ -437,16 +448,15 @@ where
     let ts = u64::from_be_bytes(ts);
 
     // FIXME: replace with proper call to fetch current nonce for account.
-    let nonce_storage = bar
-        .get_storage_at(
-            H160::from_str("0x0000000000000000000000000000000000008003").unwrap(),
-            U256::from_str("0x3e1a6e48cd7e8291e25c14adac8306b064f909d041e2dc71d7bda438c8681263")
-                .unwrap(),
-            None,
-        )
+    let nonce_storage = (&bar).get_storage_at(
+        H160::from_str("0x0000000000000000000000000000000000008003").unwrap(),
+        U256::from_str("0x3e1a6e48cd7e8291e25c14adac8306b064f909d041e2dc71d7bda438c8681263")
+            .unwrap(),
+        None,
+    );
+    let nonces: [u8; 8] = nonce_storage.unwrap().as_fixed_bytes()[24..32]
+        .try_into()
         .unwrap();
-
-    let nonces: [u8; 8] = nonce_storage.as_fixed_bytes()[24..32].try_into().unwrap();
 
     let nonces = u64::from_be_bytes(nonces);
 
@@ -460,7 +470,7 @@ where
     );
 
     let fork_details = ForkDetails {
-        fork: &bar,
+        fork_source: &bar,
         l1_block: L1BatchNumber(num as u32), //L1BatchNumber(env.block.number.to::<u32>() - 1), // HACK
         l2_miniblock: num,                   //env.block.number.to::<u64>() - 1,
         block_timestamp: ts,                 //env.block.timestamp.to::<u64>(),
@@ -468,12 +478,24 @@ where
         l1_gas_price: set_min_l1_gas_price(env.block.basefee.to::<u64>()),
     };
 
-    let node = InMemoryNode::new(Some(fork_details), ShowCalls::All, false, false);
+    let node = InMemoryNode::new(
+        Some(fork_details),
+        era_test_node::node::ShowCalls::All,
+        era_test_node::node::ShowStorageLogs::All,
+        era_test_node::node::ShowVMDetails::All,
+        false,
+        false,
+    );
 
     // TODO: get nonce on your own (from the database).
     let l2_tx = tx_env_to_era_tx(env.tx.clone(), nonces);
 
-    let era_execution_result = node.run_l2_tx_for_revm(l2_tx).unwrap();
+    let era_execution_result = node
+        .run_l2_tx_inner(
+            l2_tx,
+            vm::vm_with_bootloader::TxExecutionMode::VerifyExecute,
+        )
+        .unwrap();
 
     let (modified_keys, tx_result, block, bytecodes) = era_execution_result;
     let maybe_contract_address = contract_address_from_tx_result(&tx_result);

@@ -1,4 +1,5 @@
 pub mod conversion_utils;
+pub mod db;
 
 use std::{
     collections::{HashMap, HashSet},
@@ -34,8 +35,9 @@ use zksync_types::{
 use revm::primitives::U256 as revmU256;
 use zksync_utils::{h256_to_account_address, h256_to_u256, u256_to_h256};
 
-use crate::conversion_utils::{
-    h160_to_b160, h256_to_revm_u256, revm_u256_to_h256, u256_to_revm_u256,
+use crate::{
+    conversion_utils::{h160_to_b160, h256_to_revm_u256, revm_u256_to_h256, u256_to_revm_u256},
+    db::RevmDatabaseForEra,
 };
 
 fn contract_address_from_tx_result(execution_result: &VmTxExecutionResult) -> Option<H160> {
@@ -47,70 +49,6 @@ fn contract_address_from_tx_result(execution_result: &VmTxExecutionResult) -> Op
         }
     }
     None
-}
-
-pub struct RevmDatabaseForEra<DB> {
-    pub db: Arc<Mutex<Box<DB>>>,
-}
-
-impl<DB> Debug for RevmDatabaseForEra<DB> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RevmDatabaseForEra")
-            .field("db", &"db")
-            .finish()
-    }
-}
-
-impl<DB: Database + Send> ForkSource for &RevmDatabaseForEra<DB>
-where
-    <DB as revm::Database>::Error: Debug,
-{
-    fn get_storage_at(
-        &self,
-        address: H160,
-        idx: U256,
-        block: Option<BlockIdVariant>,
-    ) -> eyre::Result<H256> {
-        let l2_token = H160::from_str("0x000000000000000000000000000000000000800a").unwrap();
-        // Only top block is supported.
-        // FIXME
-        //assert!(block.is_none());
-        println!("Reading storage at {:?} idx: {:?}", address, idx);
-        let mut db = self.db.lock().unwrap();
-        let result = db
-            .storage(h160_to_b160(address), u256_to_revm_u256(idx))
-            .unwrap();
-        let mut result = revm_u256_to_h256(result);
-
-        if l2_token == address && result.is_zero() {
-            result = u256_to_h256(U256::from(9_223_372_036_854_775_808 as u64));
-            println!("Faking L2 token");
-        }
-        println!("Got result: {:?}", result);
-        Ok(result)
-    }
-
-    fn get_raw_block_transactions(
-        &self,
-        block_number: MiniblockNumber,
-    ) -> eyre::Result<Vec<zksync_types::Transaction>> {
-        todo!()
-    }
-
-    fn get_bytecode_by_hash(&self, hash: H256) -> eyre::Result<Option<Vec<u8>>> {
-        let mut db = self.db.lock().unwrap();
-        let result = db.code_by_hash(h256_to_b256(hash)).unwrap();
-        println!(
-            "Getting bytecode hash for {:?} size: {:?}",
-            hash,
-            result.bytecode.len()
-        );
-        Ok(Some(result.bytecode.to_vec()))
-    }
-
-    fn get_transaction_by_hash(&self, hash: H256) -> eyre::Result<Option<Transaction>> {
-        todo!()
-    }
 }
 
 fn limit_gas_more(gas_limit: U256) -> U256 {
@@ -356,7 +294,7 @@ where
 
     let foo = Arc::new(Mutex::new(Box::new(db)));
     let mut bar = RevmDatabaseForEra { db: foo };
-
+    /*
     let num_and_ts = (&bar).get_storage_at(
         H160::from_str("0x000000000000000000000000000000000000800b").unwrap(),
         U256::from(7),
@@ -369,6 +307,9 @@ where
 
     let num = u64::from_be_bytes(num);
     let ts = u64::from_be_bytes(ts);
+    */
+
+    let (num, ts) = bar.block_number_and_timestamp();
 
     // FIXME: replace with proper call to fetch current nonce for account.
     let nonce_storage = (&bar).get_storage_at(
@@ -553,10 +494,3 @@ where
         state,
     })
 }
-/*
-pub fn foobar() {
-    match revm::evm_inner::<Self, true>(env, self, &mut inspector).transact() {
-        Ok(res) => Ok(res),
-        Err(e) => eyre::bail!("backend: failed while inspecting: {:?}", e),
-    }
-}*/

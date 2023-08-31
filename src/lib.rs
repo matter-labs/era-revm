@@ -1,5 +1,6 @@
 pub mod conversion_utils;
 pub mod db;
+pub mod factory_deps;
 
 use std::{
     collections::{HashMap, HashSet},
@@ -30,6 +31,7 @@ use zksync_utils::{h256_to_account_address, u256_to_h256};
 use crate::{
     conversion_utils::{h160_to_b160, h256_to_revm_u256},
     db::RevmDatabaseForEra,
+    factory_deps::{hash_bytecode, PackedEraBytecode},
 };
 
 fn contract_address_from_tx_result(execution_result: &VmTxExecutionResult) -> Option<H160> {
@@ -85,40 +87,6 @@ pub fn encode_deploy_params_create(
     signature.iter().copied().chain(params).collect()
 }
 
-fn ensure_chunkable(bytes: &[u8]) {
-    assert!(
-        bytes.len() % 32 == 0,
-        "Bytes must be divisible by 32 to split into chunks"
-    );
-}
-
-pub fn bytes_to_chunks(bytes: &[u8]) -> Vec<[u8; 32]> {
-    ensure_chunkable(bytes);
-    bytes
-        .chunks(32)
-        .map(|el| {
-            let mut chunk = [0u8; 32];
-            chunk.copy_from_slice(el);
-            chunk
-        })
-        .collect()
-}
-
-pub fn hash_bytecode(code: &[u8]) -> H256 {
-    let chunked_code = bytes_to_chunks(code);
-    let hash = zk_evm::zkevm_opcode_defs::utils::bytecode_to_code_hash(&chunked_code)
-        .expect("Invalid bytecode");
-
-    H256(hash)
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
-pub struct PackedEraBytecode {
-    pub hash: String,
-    pub bytecode: String,
-    pub factory_deps: Vec<String>,
-}
-
 pub fn tx_env_to_era_tx(tx_env: TxEnv, nonce: u64) -> L2Tx {
     println!(
         "Creating transaction with nonce: {:?} from: {:?}",
@@ -147,30 +115,21 @@ pub fn tx_env_to_era_tx(tx_env: TxEnv, nonce: u64) -> L2Tx {
         revm::primitives::TransactTo::Create(scheme) => {
             println!("Deploy - scheme is {:?}", scheme);
 
-            let packed_bytecode: PackedEraBytecode =
-                serde_json::from_slice(&tx_env.data.to_vec()).unwrap();
+            let packed_bytecode = PackedEraBytecode::from_vec(&tx_env.data.to_vec());
 
-            //let packed_bytecodes = serde_json tx_env.data.to_vec();
-
-            let bytecode = hex::decode(packed_bytecode.bytecode.clone()).unwrap();
-            let bytecode_hash = hash_bytecode(&bytecode);
-            let factory_deps: Vec<Vec<u8>> = packed_bytecode
-                .factory_deps
-                .iter()
-                .chain([&packed_bytecode.bytecode])
-                .map(|entry| hex::decode(entry).unwrap())
-                .collect();
-
-            assert_eq!(
-                bytecode_hash,
-                H256::from_str(&packed_bytecode.hash).unwrap()
+            println!(
+                "DEPLOY - factory deps length: {:?}",
+                packed_bytecode.factory_deps().len()
             );
-            println!("DEPLOY - factory deps length: {:?}", factory_deps.len());
 
             L2Tx::new(
                 H160::from_low_u64_be(0x8006),
                 // TODO: wrap tx_env.data !!
-                encode_deploy_params_create(Default::default(), bytecode_hash, Default::default()),
+                encode_deploy_params_create(
+                    Default::default(),
+                    packed_bytecode.bytecode_hash(),
+                    Default::default(),
+                ),
                 //tx_env.data.to_vec(),
                 (tx_env.nonce.unwrap_or(nonce) as u32).into(),
                 Fee {
@@ -185,7 +144,7 @@ pub fn tx_env_to_era_tx(tx_env: TxEnv, nonce: u64) -> L2Tx {
                 },
                 tx_env.caller.as_fixed_bytes().into(),
                 U256::from_little_endian(tx_env.value.as_le_slice()),
-                Some(factory_deps), // factory_deps
+                Some(packed_bytecode.factory_deps()), // factory_deps
                 PaymasterParams::default(),
             )
         }

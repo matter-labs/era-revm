@@ -5,20 +5,27 @@
 /// This code doesn't do any mutatios to Database: after each transaction run, the Revm
 /// is usually collecing all the diffs - and applies them to database itself.
 use std::{
+    collections::HashMap,
     fmt::Debug,
     sync::{Arc, Mutex},
 };
 
-use crate::conversion_utils::h256_to_b256;
+use crate::{conversion_utils::h256_to_b256, h256_to_h160};
 use era_test_node::fork::ForkSource;
-use revm::Database;
-use zksync_basic_types::{web3::signing::keccak256, MiniblockNumber, H160, H256, U256};
+use revm::{
+    primitives::{Bytecode, Bytes},
+    Database,
+};
+use zksync_basic_types::{
+    web3::signing::keccak256, AccountTreeId, MiniblockNumber, H160, H256, U256,
+};
 use zksync_types::{
     api::{BlockIdVariant, Transaction},
-    L2_ETH_TOKEN_ADDRESS, NONCE_HOLDER_ADDRESS, SYSTEM_CONTEXT_ADDRESS,
+    StorageKey, ACCOUNT_CODE_STORAGE_ADDRESS, L2_ETH_TOKEN_ADDRESS, NONCE_HOLDER_ADDRESS,
+    SYSTEM_CONTEXT_ADDRESS,
 };
 
-use zksync_utils::{h256_to_u256, u256_to_h256};
+use zksync_utils::{address_to_h256, h256_to_u256, u256_to_h256};
 
 use crate::conversion_utils::{h160_to_b160, revm_u256_to_h256, u256_to_revm_u256};
 pub struct RevmDatabaseForEra<DB> {
@@ -67,6 +74,64 @@ where
             .storage(h160_to_b160(address), u256_to_revm_u256(idx))
             .unwrap();
         revm_u256_to_h256(result)
+    }
+
+    /// Tries to fetch the bytecode that belongs to a given account.
+    /// Start, by looking into account code storage - to see if there is any information about the bytecode for this account.
+    /// If there is none - check if any of the bytecode hashes are matching the account.
+    /// And as the final step - read the bytecode from the database itself.
+    pub fn fetch_account_code(
+        &self,
+        account: H160,
+        modified_keys: &HashMap<StorageKey, H256>,
+        bytecodes: &HashMap<U256, Vec<U256>>,
+    ) -> Option<Bytecode> {
+        // First - check if the bytecode was set/changed in the recent block.
+        if let Some(v) = modified_keys.get(&StorageKey::new(
+            AccountTreeId::new(ACCOUNT_CODE_STORAGE_ADDRESS),
+            address_to_h256(&account),
+        )) {
+            let new_bytecode_hash = v.clone();
+            let new_bytecode = bytecodes.get(&h256_to_u256(new_bytecode_hash)).unwrap();
+            let u8_bytecode: Vec<u8> = new_bytecode
+                .iter()
+                .flat_map(|x| u256_to_h256(x.clone()).to_fixed_bytes())
+                .collect();
+
+            return Some(Bytecode {
+                bytecode: Bytes::copy_from_slice(&u8_bytecode.as_slice()),
+                hash: h256_to_b256(new_bytecode_hash),
+                state: revm::primitives::BytecodeState::Raw,
+            });
+        }
+
+        // Check if maybe we got a bytecode with this hash.
+        // Unfortunately the accounts are mapped as "last 20 bytes of the 32 byte hash".
+        // so we have to iterate over all the bytecodes, truncate their hash and then compare.
+        for (k, v) in bytecodes {
+            if h256_to_h160(&u256_to_h256(k.clone())) == account {
+                let u8_bytecode: Vec<u8> = v
+                    .iter()
+                    .flat_map(|x| u256_to_h256(x.clone()).to_fixed_bytes())
+                    //.cloned()
+                    .collect();
+
+                return Some(Bytecode {
+                    bytecode: Bytes::copy_from_slice(&u8_bytecode.as_slice()),
+                    hash: h256_to_b256(u256_to_h256(*k)),
+                    state: revm::primitives::BytecodeState::Raw,
+                });
+            }
+        }
+
+        let b160_account = h160_to_b160(account);
+
+        let mut db = self.db.lock().unwrap();
+        db.basic(b160_account)
+            .ok()
+            .map(|db_account| db_account.map(|x| x.code))
+            .flatten()
+            .flatten()
     }
 }
 

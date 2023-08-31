@@ -8,12 +8,12 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use conversion_utils::{b160_to_h160, h256_to_b256};
+use conversion_utils::b160_to_h160;
 use era_test_node::{fork::ForkDetails, node::InMemoryNode};
 use revm::{
     primitives::{
-        Account, AccountInfo, Bytecode, Bytes, EVMResult, Env, Eval, ExecutionResult,
-        HashMap as rHashMap, ResultAndState, StorageSlot, TxEnv, B160,
+        Account, AccountInfo, Bytes, EVMResult, Env, Eval, ExecutionResult, HashMap as rHashMap,
+        ResultAndState, StorageSlot, TxEnv, B160,
     },
     Database,
 };
@@ -25,7 +25,7 @@ use zksync_types::{
 };
 
 use revm::primitives::U256 as revmU256;
-use zksync_utils::{h256_to_account_address, h256_to_u256, u256_to_h256};
+use zksync_utils::{h256_to_account_address, u256_to_h256};
 
 use crate::{
     conversion_utils::{h160_to_b160, h256_to_revm_u256},
@@ -215,62 +215,6 @@ pub fn h256_to_h160(i: &H256) -> H160 {
     H160::from_slice(&i.0[12..32])
 }
 
-pub fn fetch_account_code<DB: Database>(
-    account: H160,
-    db: &mut DB,
-    modified_keys: &HashMap<StorageKey, H256>,
-    bytecodes: &HashMap<U256, Vec<U256>>,
-) -> Option<Bytecode> {
-    // First - check if the bytecode was set/changed in the recent block.
-
-    let account_code_storage =
-        b160_to_h160(B160::from_str("0x0000000000000000000000000000000000008002").unwrap());
-
-    for (k, v) in modified_keys.iter() {
-        // If there was a change in 'AccountCodeStorage' system contract.
-        if k.account().address() == &account_code_storage && h256_to_h160(k.key()) == account {
-            let new_bytecode_hash = v.clone();
-            let new_bytecode = bytecodes.get(&h256_to_u256(new_bytecode_hash)).unwrap();
-            let u8_bytecode: Vec<u8> = new_bytecode
-                .iter()
-                .flat_map(|x| u256_to_h256(x.clone()).to_fixed_bytes())
-                //.cloned()
-                .collect();
-
-            return Some(Bytecode {
-                bytecode: Bytes::copy_from_slice(&u8_bytecode.as_slice()),
-                hash: h256_to_b256(new_bytecode_hash),
-                state: revm::primitives::BytecodeState::Raw,
-            });
-        }
-    }
-
-    // this is super stupid and slow
-    for (k, v) in bytecodes {
-        if h256_to_h160(&u256_to_h256(k.clone())) == account {
-            let u8_bytecode: Vec<u8> = v
-                .iter()
-                .flat_map(|x| u256_to_h256(x.clone()).to_fixed_bytes())
-                //.cloned()
-                .collect();
-
-            return Some(Bytecode {
-                bytecode: Bytes::copy_from_slice(&u8_bytecode.as_slice()),
-                hash: h256_to_b256(u256_to_h256(*k)),
-                state: revm::primitives::BytecodeState::Raw,
-            });
-        }
-    }
-
-    let b160_account = h160_to_b160(account);
-
-    db.basic(b160_account)
-        .ok()
-        .map(|db_account| db_account.map(|x| x.code))
-        .flatten()
-        .flatten()
-}
-
 pub fn run_era_transaction<'a, DB, E, INSP>(
     env: &Env,
     db: &mut DB,
@@ -416,14 +360,9 @@ where
                         })
                         .collect()
                 });
-            let mut mm = era_db.db.lock().unwrap();
 
-            let account_code = fetch_account_code(
-                account.clone(),
-                &mut mm.as_mut(),
-                &modified_keys,
-                &bytecodes,
-            );
+            let account_code =
+                era_db.fetch_account_code(account.clone(), &modified_keys, &bytecodes);
 
             if let Some(account_code) = &account_code {
                 println!(

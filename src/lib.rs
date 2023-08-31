@@ -9,34 +9,26 @@ use std::{
 };
 
 use conversion_utils::{b160_to_h160, h256_to_b256};
-use era_test_node::{
-    fork::{ForkDetails, ForkSource},
-    node::InMemoryNode,
-};
+use era_test_node::{fork::ForkDetails, node::InMemoryNode};
 use revm::{
     primitives::{
         Account, AccountInfo, Bytecode, Bytes, EVMResult, Env, Eval, ExecutionResult,
-        HashMap as rHashMap, ResultAndState, StorageSlot, TxEnv, B160, B256,
+        HashMap as rHashMap, ResultAndState, StorageSlot, TxEnv, B160,
     },
     Database,
 };
 use vm::vm::VmTxExecutionResult;
-use zksync_basic_types::{
-    web3::signing::keccak256, L1BatchNumber, L2ChainId, MiniblockNumber, H160, H256, U256,
-};
+use zksync_basic_types::{web3::signing::keccak256, L1BatchNumber, L2ChainId, H160, H256, U256};
 use zksync_types::{
-    api::{BlockIdVariant, Transaction},
-    fee::Fee,
-    l2::L2Tx,
-    transaction_request::PaymasterParams,
-    StorageKey, StorageLogQueryType, ACCOUNT_CODE_STORAGE_ADDRESS,
+    fee::Fee, l2::L2Tx, transaction_request::PaymasterParams, StorageKey, StorageLogQueryType,
+    ACCOUNT_CODE_STORAGE_ADDRESS,
 };
 
 use revm::primitives::U256 as revmU256;
 use zksync_utils::{h256_to_account_address, h256_to_u256, u256_to_h256};
 
 use crate::{
-    conversion_utils::{h160_to_b160, h256_to_revm_u256, revm_u256_to_h256, u256_to_revm_u256},
+    conversion_utils::{h160_to_b160, h256_to_revm_u256},
     db::RevmDatabaseForEra,
 };
 
@@ -282,8 +274,8 @@ pub fn fetch_account_code<DB: Database>(
 pub fn run_era_transaction<'a, DB, E, INSP>(
     env: &Env,
     db: &mut DB,
-    inspector: INSP, //    db: &dyn Database<Error = DatabaseError>,
-                     //    inspector: &mut dyn Inspector<dyn Database<Error = DatabaseError>>,
+    _inspector: INSP, //    db: &dyn Database<Error = DatabaseError>,
+                      //    inspector: &mut dyn Inspector<dyn Database<Error = DatabaseError>>,
 ) -> EVMResult<E>
 where
     DB: Database + Send + 'a,
@@ -292,12 +284,13 @@ where
     // TODO - pass chain_id from env.cfg_env
     // TODO: pass stuff from block env (block number etc) into fork.
 
-    let foo = Arc::new(Mutex::new(Box::new(db)));
-    let bar = RevmDatabaseForEra { db: foo };
+    let era_db = RevmDatabaseForEra {
+        db: Arc::new(Mutex::new(Box::new(db))),
+    };
 
-    let (num, ts) = bar.block_number_and_timestamp();
+    let (num, ts) = era_db.block_number_and_timestamp();
 
-    let nonces = bar.get_nonce_for_address(b160_to_h160(env.tx.caller));
+    let nonces = era_db.get_nonce_for_address(b160_to_h160(env.tx.caller));
 
     println!(
         "*** Starting ERA transaction: block: {:?} timestamp: {:?} - but using {:?} and {:?} instead with nonce {:?}",
@@ -309,7 +302,7 @@ where
     );
 
     let fork_details = ForkDetails {
-        fork_source: &bar,
+        fork_source: &era_db,
         l1_block: L1BatchNumber(num as u32), //L1BatchNumber(env.block.number.to::<u32>() - 1), // HACK
         l2_miniblock: num,                   //env.block.number.to::<u64>() - 1,
         block_timestamp: ts,                 //env.block.timestamp.to::<u64>(),
@@ -326,7 +319,6 @@ where
         false,
     );
 
-    // TODO: get nonce on your own (from the database).
     let l2_tx = tx_env_to_era_tx(env.tx.clone(), nonces);
 
     let era_execution_result = node
@@ -336,7 +328,7 @@ where
         )
         .unwrap();
 
-    let (modified_keys, tx_result, block, bytecodes) = era_execution_result;
+    let (modified_keys, tx_result, _block, bytecodes) = era_execution_result;
     let maybe_contract_address = contract_address_from_tx_result(&tx_result);
 
     let execution_result = match tx_result.status {
@@ -393,7 +385,7 @@ where
     // FIXME: also load stuff from database somehow.
 
     if let Some(account_bytecodes) = account_to_keys.get(&account_code_storage) {
-        for (k, v) in account_bytecodes {
+        for (k, _) in account_bytecodes {
             let account_address = H160::from_slice(&k.key().0[12..32]);
             accounts_touched.insert(account_address);
         }
@@ -424,7 +416,7 @@ where
                         })
                         .collect()
                 });
-            let mut mm = bar.db.lock().unwrap();
+            let mut mm = era_db.db.lock().unwrap();
 
             let account_code = fetch_account_code(
                 account.clone(),

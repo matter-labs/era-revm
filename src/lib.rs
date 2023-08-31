@@ -293,36 +293,11 @@ where
     // TODO: pass stuff from block env (block number etc) into fork.
 
     let foo = Arc::new(Mutex::new(Box::new(db)));
-    let mut bar = RevmDatabaseForEra { db: foo };
-    /*
-    let num_and_ts = (&bar).get_storage_at(
-        H160::from_str("0x000000000000000000000000000000000000800b").unwrap(),
-        U256::from(7),
-        None,
-    );
-    let ab1 = num_and_ts.unwrap();
-    let bb = ab1.as_fixed_bytes();
-    let num: [u8; 8] = bb[24..32].try_into().unwrap();
-    let ts: [u8; 8] = bb[8..16].try_into().unwrap();
-
-    let num = u64::from_be_bytes(num);
-    let ts = u64::from_be_bytes(ts);
-    */
+    let bar = RevmDatabaseForEra { db: foo };
 
     let (num, ts) = bar.block_number_and_timestamp();
 
-    // FIXME: replace with proper call to fetch current nonce for account.
-    let nonce_storage = (&bar).get_storage_at(
-        H160::from_str("0x0000000000000000000000000000000000008003").unwrap(),
-        U256::from_str("0x3e1a6e48cd7e8291e25c14adac8306b064f909d041e2dc71d7bda438c8681263")
-            .unwrap(),
-        None,
-    );
-    let nonces: [u8; 8] = nonce_storage.unwrap().as_fixed_bytes()[24..32]
-        .try_into()
-        .unwrap();
-
-    let nonces = u64::from_be_bytes(nonces);
+    let nonces = bar.get_nonce_for_address(b160_to_h160(env.tx.caller));
 
     println!(
         "*** Starting ERA transaction: block: {:?} timestamp: {:?} - but using {:?} and {:?} instead with nonce {:?}",

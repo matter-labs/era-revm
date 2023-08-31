@@ -6,20 +6,19 @@
 /// is usually collecing all the diffs - and applies them to database itself.
 use std::{
     fmt::Debug,
-    str::FromStr,
     sync::{Arc, Mutex},
 };
 
 use crate::conversion_utils::h256_to_b256;
 use era_test_node::fork::ForkSource;
 use revm::Database;
-use zksync_basic_types::{MiniblockNumber, H160, H256, U256};
+use zksync_basic_types::{web3::signing::keccak256, MiniblockNumber, H160, H256, U256};
 use zksync_types::{
     api::{BlockIdVariant, Transaction},
-    L2_ETH_TOKEN_ADDRESS, SYSTEM_CONTEXT_ADDRESS,
+    L2_ETH_TOKEN_ADDRESS, NONCE_HOLDER_ADDRESS, SYSTEM_CONTEXT_ADDRESS,
 };
 
-use zksync_utils::u256_to_h256;
+use zksync_utils::{h256_to_u256, u256_to_h256};
 
 use crate::conversion_utils::{h160_to_b160, revm_u256_to_h256, u256_to_revm_u256};
 pub struct RevmDatabaseForEra<DB> {
@@ -47,6 +46,19 @@ where
         let ts: [u8; 8] = num_and_ts_bytes[8..16].try_into().unwrap();
 
         (u64::from_be_bytes(num), u64::from_be_bytes(ts))
+    }
+
+    /// Returns the nonce for a given account from NonceHolder storage.
+    pub fn get_nonce_for_address(&self, address: H160) -> u64 {
+        // Nonce is stored in the first mapping of the Nonce contract.
+        let storage_idx = [&[0; 12], address.as_bytes(), &[0; 32]].concat();
+        let storage_idx = H256::from_slice(&keccak256(storage_idx.as_slice()));
+        println!("Nonce keccak is: {}", storage_idx);
+
+        let nonce_storage =
+            self.read_storage_internal(NONCE_HOLDER_ADDRESS, h256_to_u256(storage_idx));
+        let nonces: [u8; 8] = nonce_storage.as_fixed_bytes()[24..32].try_into().unwrap();
+        u64::from_be_bytes(nonces)
     }
 
     fn read_storage_internal(&self, address: H160, idx: U256) -> H256 {

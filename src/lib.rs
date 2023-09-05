@@ -5,12 +5,11 @@ pub mod factory_deps;
 use std::{
     collections::{HashMap, HashSet},
     fmt::Debug,
-    str::FromStr,
     sync::{Arc, Mutex},
 };
 
 use conversion_utils::b160_to_h160;
-use era_test_node::{fork::ForkDetails, node::InMemoryNode};
+use era_test_node::{fork::ForkDetails, node::InMemoryNode, system_contracts};
 use revm::{
     primitives::{
         Account, AccountInfo, Bytes, EVMResult, Env, Eval, ExecutionResult, HashMap as rHashMap,
@@ -31,7 +30,7 @@ use zksync_utils::{h256_to_account_address, u256_to_h256};
 use crate::{
     conversion_utils::{h160_to_b160, h256_to_revm_u256},
     db::RevmDatabaseForEra,
-    factory_deps::{hash_bytecode, PackedEraBytecode},
+    factory_deps::PackedEraBytecode,
 };
 
 fn contract_address_from_tx_result(execution_result: &VmTxExecutionResult) -> Option<H160> {
@@ -130,7 +129,6 @@ pub fn tx_env_to_era_tx(tx_env: TxEnv, nonce: u64) -> L2Tx {
                     packed_bytecode.bytecode_hash(),
                     Default::default(),
                 ),
-                //tx_env.data.to_vec(),
                 (tx_env.nonce.unwrap_or(nonce) as u32).into(),
                 Fee {
                     gas_limit: limit_gas_more(tx_env.gas_limit.into()),
@@ -144,7 +142,7 @@ pub fn tx_env_to_era_tx(tx_env: TxEnv, nonce: u64) -> L2Tx {
                 },
                 tx_env.caller.as_fixed_bytes().into(),
                 U256::from_little_endian(tx_env.value.as_le_slice()),
-                Some(packed_bytecode.factory_deps()), // factory_deps
+                Some(packed_bytecode.factory_deps()),
                 PaymasterParams::default(),
             )
         }
@@ -184,9 +182,6 @@ where
     DB: Database + Send + 'a,
     <DB as revm::Database>::Error: Debug,
 {
-    // TODO - pass chain_id from env.cfg_env
-    // TODO: pass stuff from block env (block number etc) into fork.
-
     let era_db = RevmDatabaseForEra {
         db: Arc::new(Mutex::new(Box::new(db))),
     };
@@ -219,7 +214,8 @@ where
         era_test_node::node::ShowStorageLogs::All,
         era_test_node::node::ShowVMDetails::All,
         false,
-        false,
+        // Disable security on default accounts.
+        &system_contracts::Options::BuiltInWithoutSecurity,
     );
 
     let l2_tx = tx_env_to_era_tx(env.tx.clone(), nonces);
@@ -254,7 +250,6 @@ where
             }
         }
     };
-    //let state: State= Default::default();
 
     let account_to_keys: HashMap<H160, HashMap<StorageKey, H256>> =
         modified_keys
@@ -278,13 +273,12 @@ where
     for x in account_to_keys.keys() {
         accounts_touched.insert(x.clone());
     }
-    // Also insert 'fake' accoutnts for bytecodes (to make sure that factory bytecodes get persisted).
+    // Also insert 'fake' accounts for bytecodes (to make sure that factory bytecodes get persisted).
     for (k, _) in &bytecodes {
         accounts_touched.insert(h256_to_h160(&u256_to_h256(*k)));
     }
 
-    let account_code_storage =
-        b160_to_h160(B160::from_str("0x0000000000000000000000000000000000008002").unwrap());
+    let account_code_storage = ACCOUNT_CODE_STORAGE_ADDRESS;
     // FIXME: also load stuff from database somehow.
 
     if let Some(account_bytecodes) = account_to_keys.get(&account_code_storage) {
@@ -325,7 +319,7 @@ where
 
             if let Some(account_code) = &account_code {
                 println!(
-                    "Setting accoutn code for {:?} hash: {:?} len {:?}",
+                    "Setting account code for {:?} hash: {:?} len {:?}",
                     account,
                     account_code.hash,
                     account_code.bytes().len()
@@ -337,11 +331,11 @@ where
                 Account {
                     info: AccountInfo {
                         balance: revm::primitives::U256::ZERO, // FIXME
-                        nonce: 1,                              // FIXME
+                        nonce: era_db.get_nonce_for_address(*account),
                         code_hash: account_code
                             .as_ref()
                             .map(|x| x.hash().clone())
-                            .unwrap_or_default(), // FIXME
+                            .unwrap_or_default(),
                         code: account_code,
                     },
                     storage: storage.unwrap_or_default(),

@@ -19,6 +19,16 @@ pub struct PackedEraBytecode {
 }
 
 impl PackedEraBytecode {
+    pub fn new(hash: String, bytecode: String, factory_deps: Vec<String>) -> Self {
+        Self {
+            hash,
+            bytecode,
+            factory_deps,
+        }
+    }
+    pub fn to_vec(&self) -> Vec<u8> {
+        serde_json::to_vec(self).unwrap()
+    }
     pub fn from_vec(input: &Vec<u8>) -> Self {
         serde_json::from_slice(input).unwrap()
     }

@@ -28,7 +28,7 @@ use revm::primitives::U256 as revmU256;
 use zksync_utils::{h256_to_account_address, u256_to_h256};
 
 use crate::{
-    conversion_utils::{h160_to_b160, h256_to_revm_u256},
+    conversion_utils::{h160_to_b160, h256_to_revm_u256, u256_to_revm_u256},
     db::RevmDatabaseForEra,
     factory_deps::PackedEraBytecode,
 };
@@ -173,7 +173,7 @@ pub fn h256_to_h160(i: &H256) -> H160 {
 }
 
 pub fn run_era_transaction<'a, DB, E, INSP>(
-    env: &Env,
+    env: &mut Env,
     db: &mut DB,
     _inspector: INSP, //    db: &dyn Database<Error = DatabaseError>,
                       //    inspector: &mut dyn Inspector<dyn Database<Error = DatabaseError>>,
@@ -199,11 +199,16 @@ where
         nonces
     );
 
+    // Update the environment timestamp and block number.
+    // Check if this should be done at the end?
+    env.block.number = u256_to_revm_u256(U256::from(num));
+    env.block.timestamp = u256_to_revm_u256(U256::from(ts));
+
     let fork_details = ForkDetails {
         fork_source: &era_db,
-        l1_block: L1BatchNumber(num as u32), //L1BatchNumber(env.block.number.to::<u32>() - 1), // HACK
-        l2_miniblock: num,                   //env.block.number.to::<u64>() - 1,
-        block_timestamp: ts,                 //env.block.timestamp.to::<u64>(),
+        l1_block: L1BatchNumber(num as u32),
+        l2_miniblock: num,
+        block_timestamp: ts,
         overwrite_chain_id: Some(L2ChainId(env.cfg.chain_id.to::<u16>())),
         l1_gas_price: set_min_l1_gas_price(env.block.basefee.to::<u64>()),
     };

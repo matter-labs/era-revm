@@ -1,5 +1,5 @@
 [package]
-name = "revm_era"
+name = "era_revm"
 version = "0.1.0"
 edition = "2021"
 

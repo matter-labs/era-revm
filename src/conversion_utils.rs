@@ -41,6 +41,10 @@ pub fn h256_to_b256(i: H256) -> B256 {
     i.to_fixed_bytes().into()
 }
 
+pub fn h256_to_h160(i: &H256) -> H160 {
+    H160::from_slice(&i.0[12..32])
+}
+
 #[cfg(test)]
 mod test {
     use std::str::FromStr;

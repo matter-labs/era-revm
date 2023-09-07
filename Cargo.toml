@@ -17,8 +17,8 @@ revm = { git = "https://github.com/mm-zk/revm.git", branch = "release_v25_with_o
 #  "optional_eip3607"
 #] }
 
-era_test_node = { path = "../era-test-node"}
-# era_test_node = {git = "https://github.com/matter-labs/era-test-node.git", branch = "main"}
+# era_test_node = { path = "../era-test-node"}
+era_test_node = {git = "https://github.com/matter-labs/era-test-node.git", rev = "8013425569340833d4177526850fb517c604bc49"}
 
 # zksync_basic_types = {path = "../zksync-era/core/lib/basic_types"}
 zksync_basic_types = { git = "https://github.com/matter-labs/zksync-era.git", rev = "a98e454221da7d6ecad9b317cf44b0786e819659" }

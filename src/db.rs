@@ -10,7 +10,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use crate::{conversion_utils::h256_to_b256, h256_to_h160};
+use crate::conversion_utils::{h256_to_b256, h256_to_h160};
 use era_test_node::fork::ForkSource;
 use revm::{
     primitives::{Bytecode, Bytes},
@@ -60,7 +60,6 @@ where
         // Nonce is stored in the first mapping of the Nonce contract.
         let storage_idx = [&[0; 12], address.as_bytes(), &[0; 32]].concat();
         let storage_idx = H256::from_slice(&keccak256(storage_idx.as_slice()));
-        println!("Nonce keccak is: {}", storage_idx);
 
         let nonce_storage =
             self.read_storage_internal(NONCE_HOLDER_ADDRESS, h256_to_u256(storage_idx));
@@ -161,7 +160,6 @@ where
                 _ => eyre::bail!("Only fetching most recent block is implemented"),
             }
         }
-        println!("Reading storage at {:?} idx: {:?}", address, idx);
         let mut result = self.read_storage_internal(address, idx);
 
         if L2_ETH_TOKEN_ADDRESS == address && result.is_zero() {

@@ -30,7 +30,7 @@ zksync_utils = { git = "https://github.com/matter-labs/zksync-era.git", rev = "a
 
 
 ethabi = "18.0.0"
-zk_evm = {git = "https://github.com/matter-labs/era-zk_evm.git", branch = "v1.3.3"}
+zk_evm = {git = "https://github.com/matter-labs/era-zk_evm.git", branch = "v1.3.3", tag = “v1.3.3-rc0”}
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 hex = "0.4"

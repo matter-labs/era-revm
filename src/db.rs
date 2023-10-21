@@ -189,4 +189,59 @@ where
     fn get_transaction_by_hash(&self, _hash: H256) -> eyre::Result<Option<Transaction>> {
         todo!()
     }
+
+    fn get_transaction_details(&self, _hash: H256) -> eyre::Result<Option<Transaction>> {
+        todo!()
+    }
+
+    fn get_block_by_hash(
+            &self,
+            hash: H256,
+            full_transactions: bool,
+        ) -> eyre::Result<Option<zksync_types::api::Block<zksync_types::api::TransactionVariant>>> {
+            todo!()
+    }
+
+    fn get_block_by_number(
+            &self,
+            block_number: zksync_types::api::BlockNumber,
+            full_transactions: bool,
+        ) -> eyre::Result<Option<zksync_types::api::Block<zksync_types::api::TransactionVariant>>> {
+        todo!()
+    }
+
+    fn get_block_details(&self, miniblock: MiniblockNumber) -> eyre::Result<Option<zksync_types::api::BlockDetails>> {
+        todo!()
+    }
+
+    fn get_block_transaction_count_by_hash(&self, block_hash: H256) -> eyre::Result<Option<U256>> {
+        todo!()
+    }
+
+    fn get_block_transaction_count_by_number(
+            &self,
+            block_number: zksync_types::api::BlockNumber,
+        ) -> eyre::Result<Option<U256>> {
+        todo!()
+    }
+
+    fn get_transaction_by_block_hash_and_index(
+            &self,
+            block_hash: H256,
+            index: zksync_basic_types::web3::types::Index,
+        ) -> eyre::Result<Option<Transaction>> {
+        todo!()
+    }
+
+    fn get_transaction_by_block_number_and_index(
+            &self,
+            block_number: zksync_types::api::BlockNumber,
+            index: zksync_basic_types::web3::types::Index,
+        ) -> eyre::Result<Option<Transaction>> {
+        todo!()
+    }
+
+    fn get_bridge_contracts(&self) -> eyre::Result<zksync_types::api::BridgeAddresses> {
+        todo!()
+    }
 }

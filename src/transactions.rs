@@ -3,7 +3,7 @@ use std::{
     fmt::Debug,
     sync::{Arc, Mutex},
 };
-
+use multivm::interface::VmExecutionResultAndLogs;
 use era_test_node::{fork::ForkDetails, node::InMemoryNode, system_contracts};
 use revm::{
     primitives::{
@@ -12,10 +12,10 @@ use revm::{
     },
     Database,
 };
-use vm::vm::VmTxExecutionResult;
-use zksync_basic_types::{web3::signing::keccak256, L1BatchNumber, L2ChainId, H160, H256, U256};
+use zksync_basic_types::{web3::signing::keccak256, L1BatchNumber, H160, H256, U256};
 use zksync_types::{
     fee::Fee, l2::L2Tx, transaction_request::PaymasterParams, StorageKey, StorageLogQueryType,
+    L2ChainId,
     ACCOUNT_CODE_STORAGE_ADDRESS,
 };
 
@@ -31,8 +31,8 @@ use crate::{
     factory_deps::PackedEraBytecode,
 };
 
-fn contract_address_from_tx_result(execution_result: &VmTxExecutionResult) -> Option<H160> {
-    for query in execution_result.result.logs.storage_logs.iter().rev() {
+fn contract_address_from_tx_result(execution_result: &VmExecutionResultAndLogs) -> Option<H160> {
+    for query in execution_result.logs.storage_logs.iter().rev() {
         if query.log_type == StorageLogQueryType::InitialWrite
             && query.log_query.address == ACCOUNT_CODE_STORAGE_ADDRESS
         {
@@ -158,7 +158,9 @@ where
     let fork_details = ForkDetails {
         fork_source: &era_db,
         l1_block: L1BatchNumber(num as u32),
+        l2_block: num,
         l2_miniblock: num,
+        l2_miniblock_hash: Default::default(),
         block_timestamp: ts,
         overwrite_chain_id: Some(L2ChainId(env.cfg.chain_id.to::<u16>())),
         // Make sure that l1 gas price is set to reasonable values.
@@ -167,13 +169,16 @@ where
 
     let node = InMemoryNode::new(
         Some(fork_details),
-        era_test_node::node::ShowCalls::None,
-        era_test_node::node::ShowStorageLogs::None,
-        era_test_node::node::ShowVMDetails::None,
-        era_test_node::node::ShowGasDetails::None,
-        false,
-        // Disable security on default accounts.
-        &system_contracts::Options::BuiltInWithoutSecurity,
+        None,
+        Default::default(),
+        // era_test_node::node::ShowCalls::None,
+        // InMemoryNodeConfig::default(),
+        // era_test_node::node::ShowStorageLogs::None,
+        // era_test_node::node::ShowVMDetails::None,
+        // era_test_node::node::ShowGasDetails::None,
+        // false,
+        // // Disable security on default accounts.
+        // &system_contracts::Options::BuiltInWithoutSecurity,
     );
 
     let l2_tx = tx_env_to_era_tx(env.tx.clone(), nonces);
@@ -181,19 +186,19 @@ where
     let era_execution_result = node
         .run_l2_tx_inner(
             l2_tx,
-            vm::vm_with_bootloader::TxExecutionMode::VerifyExecute,
+            multivm::interface::TxExecutionMode::VerifyExecute,
         )
         .unwrap();
 
-    let (modified_keys, tx_result, _block, bytecodes) = era_execution_result;
+    let (modified_keys, tx_result, _block, bytecodes, _, _) = era_execution_result;
     let maybe_contract_address = contract_address_from_tx_result(&tx_result);
 
-    let execution_result = match tx_result.status {
-        zksync_types::tx::tx_execution_info::TxExecutionStatus::Success => {
+    let execution_result = match tx_result.result {
+        ExecutionResult::Success { output, .. } => {
             ExecutionResult::Success {
                 reason: Eval::Return,
-                gas_used: env.tx.gas_limit - tx_result.gas_refunded as u64,
-                gas_refunded: tx_result.gas_refunded as u64,
+                gas_used: env.tx.gas_limit - tx_result.refunds.gas_refunded as u64,
+                gas_refunded: tx_result.refunds.gas_refunded as u64,
                 logs: vec![],
                 output: revm::primitives::Output::Create(
                     Bytes::new(), // FIXME (function results)
@@ -201,13 +206,14 @@ where
                 ),
             }
         }
-        zksync_types::tx::tx_execution_info::TxExecutionStatus::Failure => {
+        ExecutionResult::Revert { .. } | ExecutionResult::Halt { .. } => {
             ExecutionResult::Revert {
-                gas_used: env.tx.gas_limit - tx_result.gas_refunded as u64,
+                gas_used: env.tx.gas_limit - tx_result.refunds.gas_refunded as u64,
                 output: Bytes::new(), // FIXME (function results)
             }
         }
     };
+    
 
     let account_to_keys: HashMap<H160, HashMap<StorageKey, H256>> =
         modified_keys

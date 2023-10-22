@@ -20,14 +20,15 @@ use zksync_basic_types::{
     web3::signing::keccak256, AccountTreeId, MiniblockNumber, H160, H256, U256,
 };
 use zksync_types::{
-    api::{BlockIdVariant, Transaction},
+    api::{BlockIdVariant, Transaction, TransactionDetails},
     StorageKey, ACCOUNT_CODE_STORAGE_ADDRESS, L2_ETH_TOKEN_ADDRESS, NONCE_HOLDER_ADDRESS,
     SYSTEM_CONTEXT_ADDRESS,
 };
+use eyre::ErrReport;
 
 use zksync_utils::{address_to_h256, h256_to_u256, u256_to_h256};
 
-use crate::conversion_utils::{h160_to_b160, revm_u256_to_h256, u256_to_revm_u256};
+use crate::conversion_utils::{h160_to_address, revm_u256_to_h256, u256_to_revm_u256};
 pub struct RevmDatabaseForEra<DB> {
     pub db: Arc<Mutex<Box<DB>>>,
 }
@@ -70,7 +71,7 @@ where
     fn read_storage_internal(&self, address: H160, idx: U256) -> H256 {
         let mut db = self.db.lock().unwrap();
         let result = db
-            .storage(h160_to_b160(address), u256_to_revm_u256(idx))
+            .storage(h160_to_address(address), u256_to_revm_u256(idx))
             .unwrap();
         revm_u256_to_h256(result)
     }
@@ -99,7 +100,7 @@ where
 
             return Some(Bytecode {
                 bytecode: Bytes::copy_from_slice(&u8_bytecode.as_slice()),
-                hash: h256_to_b256(new_bytecode_hash),
+                // hash: h256_to_b256(new_bytecode_hash),
                 state: revm::primitives::BytecodeState::Raw,
             });
         }
@@ -117,16 +118,16 @@ where
 
                 return Some(Bytecode {
                     bytecode: Bytes::copy_from_slice(&u8_bytecode.as_slice()),
-                    hash: h256_to_b256(u256_to_h256(*k)),
+                    // hash: h256_to_b256(u256_to_h256(*k)),
                     state: revm::primitives::BytecodeState::Raw,
                 });
             }
         }
 
-        let b160_account = h160_to_b160(account);
+        let account = h160_to_address(account);
 
         let mut db = self.db.lock().unwrap();
-        db.basic(b160_account)
+        db.basic(account)
             .ok()
             .map(|db_account| db_account.map(|x| x.code))
             .flatten()
@@ -190,7 +191,7 @@ where
         todo!()
     }
 
-    fn get_transaction_details(&self, _hash: H256) -> eyre::Result<Option<Transaction>> {
+    fn get_transaction_details(&self, _hash: H256) -> Result<std::option::Option<TransactionDetails>, ErrReport> {
         todo!()
     }
 

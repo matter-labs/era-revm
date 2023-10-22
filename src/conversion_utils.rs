@@ -1,15 +1,15 @@
 /// Conversion between REVM units and zkSync units.
 use revm::primitives::U256 as revmU256;
-use revm::primitives::{B160, B256};
+use revm::primitives::{Address, B256};
 
 use zksync_basic_types::{H160, H256, U256};
 use zksync_utils::h256_to_u256;
 
-pub fn b160_to_h160(i: B160) -> H160 {
-    i.as_fixed_bytes().into()
+pub fn address_to_h160(i: Address) -> H160 {
+    H160::from(i.0 .0)
 }
 
-pub fn h160_to_b160(i: H160) -> B160 {
+pub fn h160_to_address(i: H160) -> Address {
     i.as_fixed_bytes().into()
 }
 
@@ -55,10 +55,10 @@ mod test {
 
     #[test]
     fn test_160_conversion() {
-        let b = B160::from_str("0x000000000000000000000000000000000000800b").unwrap();
-        let h = b160_to_h160(b);
+        let b = Address::from_str("0x000000000000000000000000000000000000800b").unwrap();
+        let h = address_to_h160(b);
         assert_eq!(h.to_string(), "0x0000…800b");
-        let b2 = h160_to_b160(h);
+        let b2 = h160_to_address(h);
         assert_eq!(b, b2);
     }
 

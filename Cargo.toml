@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 
-revm = { git = "https://github.com/dutterbutter/revm.git", branch = "release_v26_with_old_sha" }
+revm = { git = "https://github.com/dutterbutter/revm.git", branch = "db/release_v26_sha3_0.10.6" }
 #revm = { version = "2.3", default-features = false, features = [
 #  "std",
 #  "k256",

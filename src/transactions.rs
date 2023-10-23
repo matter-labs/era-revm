@@ -1,4 +1,4 @@
-use era_test_node::{fork::ForkDetails, node::{InMemoryNode, InMemoryNodeConfig, ShowCalls, ShowStorageLogs, ShowVMDetails, ShowGasDetails}, system_contracts};
+use era_test_node::{fork::ForkDetails, observability::{Observability, LogLevel}, node::{InMemoryNode, InMemoryNodeConfig, ShowCalls, ShowStorageLogs, ShowVMDetails, ShowGasDetails}, system_contracts};
 use multivm::interface::VmExecutionResultAndLogs;
 use revm::{
     primitives::{
@@ -7,11 +7,13 @@ use revm::{
     },
     Database,
 };
+use tracing_subscriber::filter::LevelFilter;
 use std::{
     collections::{HashMap, HashSet},
     fmt::Debug,
     sync::{Arc, Mutex},
 };
+use std::fs::File;
 use zksync_basic_types::{web3::signing::keccak256, L1BatchNumber, H160, H256, U256};
 use zksync_types::api::{Block, BridgeAddresses, Transaction, TransactionVariant};
 use zksync_types::{
@@ -159,7 +161,7 @@ where
         env.cfg.chain_id as u32
     } else {
         // TODO: FIXME
-        u32::default()
+        31337
     };
     println!("*** Using chain_id: {:?}", chain_id_u32);
     println!("CHAINID:::   {:?} ", Some(L2ChainId::from(chain_id_u32)));
@@ -174,15 +176,21 @@ where
         // Make sure that l1 gas price is set to reasonable values.
         l1_gas_price: u64::max(env.block.basefee.to::<u64>(), 1000),
     };
+
+    let log_level_filter = LevelFilter::from(LogLevel::Debug);
+    let log_file = File::create("./log_era-revm").unwrap();
+
+    // Initialize the tracing subscriber
+    let observability = Observability::init(String::from("era_test_node"), log_level_filter, log_file).unwrap();
     let config = InMemoryNodeConfig {
-        show_calls: ShowCalls::None,
-        show_storage_logs: ShowStorageLogs::None,
-        show_vm_details: ShowVMDetails::None,
+        show_calls: ShowCalls::All,
+        show_storage_logs: ShowStorageLogs::All,
+        show_vm_details: ShowVMDetails::All,
         show_gas_details: ShowGasDetails::None,
         resolve_hashes: false,  
         system_contracts_options: system_contracts::Options::BuiltInWithoutSecurity,
     };
-    let node = InMemoryNode::new(Some(fork_details), None, config);
+    let node = InMemoryNode::new(Some(fork_details), Some(observability), config);
 
     let l2_tx = tx_env_to_era_tx(env.tx.clone(), nonces);
 

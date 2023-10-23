@@ -156,6 +156,7 @@ where
     env.block.number = u256_to_revm_u256(U256::from(num));
     env.block.timestamp = u256_to_revm_u256(U256::from(ts));
 
+    println!("*** chain_id: {:?}", env.cfg.chain_id);
     let chain_id_u32 = if env.cfg.chain_id <= u32::MAX as u64 {
         env.cfg.chain_id as u32
     } else {
@@ -170,7 +171,7 @@ where
         l2_miniblock: num,
         l2_miniblock_hash: Default::default(),
         block_timestamp: ts,
-        overwrite_chain_id: Some(L2ChainId::from(chain_id_u32)),
+        overwrite_chain_id: None,
         // Make sure that l1 gas price is set to reasonable values.
         l1_gas_price: u64::max(env.block.basefee.to::<u64>(), 1000),
     };

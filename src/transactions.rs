@@ -1,4 +1,4 @@
-use era_test_node::{fork::ForkDetails, node::InMemoryNode, system_contracts};
+use era_test_node::{fork::ForkDetails, node::{InMemoryNode, InMemoryNodeConfig, ShowCalls, ShowStorageLogs, ShowVMDetails, ShowGasDetails}, system_contracts};
 use multivm::interface::VmExecutionResultAndLogs;
 use revm::{
     primitives::{
@@ -173,8 +173,15 @@ where
         // Make sure that l1 gas price is set to reasonable values.
         l1_gas_price: u64::max(env.block.basefee.to::<u64>(), 1000),
     };
-
-    let node = InMemoryNode::new(Some(fork_details), None, Default::default());
+    let config = InMemoryNodeConfig {
+        show_calls: ShowCalls::None,
+        show_storage_logs: ShowStorageLogs::None,
+        show_vm_details: ShowVMDetails::None,
+        show_gas_details: ShowGasDetails::None,
+        resolve_hashes: false,  
+        system_contracts_options: system_contracts::Options::BuiltInWithoutSecurity,
+    };
+    let node = InMemoryNode::new(Some(fork_details), None, config);
 
     let l2_tx = tx_env_to_era_tx(env.tx.clone(), nonces);
 

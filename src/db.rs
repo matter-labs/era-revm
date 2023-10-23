@@ -100,7 +100,6 @@ where
 
             return Some(Bytecode {
                 bytecode: Bytes::copy_from_slice(&u8_bytecode.as_slice()),
-                // hash: h256_to_b256(new_bytecode_hash),
                 state: revm::primitives::BytecodeState::Raw,
             });
         }

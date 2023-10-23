@@ -161,7 +161,8 @@ where
         // TODO: FIXME
         u32::default()
     };
-
+    println!("*** Using chain_id: {:?}", chain_id_u32);
+    println!("CHAINID:::   {:?} ", Some(L2ChainId::from(chain_id_u32)));
     let fork_details = ForkDetails {
         fork_source: &era_db,
         l1_block: L1BatchNumber(num as u32),
@@ -279,6 +280,7 @@ where
             let code_hash = match &account_code {
                 Some(bytecode) => revm_keccak256(bytecode.bytes()),
                 None => {
+                    println!("*** No bytecode for account: {:?}", account);
                     // TODO: FIXME
                     // Handle the case when there's no bytecode
                     KECCAK_EMPTY

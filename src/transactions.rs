@@ -1,23 +1,22 @@
+use era_test_node::{fork::ForkDetails, node::InMemoryNode, system_contracts};
+use multivm::interface::VmExecutionResultAndLogs;
+use revm::{
+    primitives::{
+        keccak256 as revm_keccak256, Account, AccountInfo, Address, Bytes, EVMResult, Env, Eval,
+        ExecutionResult, HashMap as rHashMap, ResultAndState, StorageSlot, TxEnv, KECCAK_EMPTY,
+    },
+    Database,
+};
 use std::{
     collections::{HashMap, HashSet},
     fmt::Debug,
     sync::{Arc, Mutex},
 };
-use multivm::interface::VmExecutionResultAndLogs;
-use era_test_node::{fork::ForkDetails, node::InMemoryNode, system_contracts};
-use revm::{
-    primitives::{
-        Account, AccountInfo, Bytes, EVMResult, Env, Eval, ExecutionResult, HashMap as rHashMap,
-        ResultAndState, StorageSlot, TxEnv, Address, keccak256 as revm_keccak256, KECCAK_EMPTY
-    },
-    Database,
-};
-use zksync_types::api::{Block, BridgeAddresses, Transaction, TransactionVariant};
 use zksync_basic_types::{web3::signing::keccak256, L1BatchNumber, H160, H256, U256};
+use zksync_types::api::{Block, BridgeAddresses, Transaction, TransactionVariant};
 use zksync_types::{
-    fee::Fee, l2::L2Tx, transaction_request::PaymasterParams, StorageKey, StorageLogQueryType,
-    L2ChainId,
-    ACCOUNT_CODE_STORAGE_ADDRESS,
+    fee::Fee, l2::L2Tx, transaction_request::PaymasterParams, L2ChainId, StorageKey,
+    StorageLogQueryType, ACCOUNT_CODE_STORAGE_ADDRESS,
 };
 
 use revm::primitives::U256 as revmU256;
@@ -175,22 +174,16 @@ where
         l1_gas_price: u64::max(env.block.basefee.to::<u64>(), 1000),
     };
 
-    let node = InMemoryNode::new(
-        Some(fork_details),
-        None,
-        Default::default(),
-    );
+    let node = InMemoryNode::new(Some(fork_details), None, Default::default());
 
     let l2_tx = tx_env_to_era_tx(env.tx.clone(), nonces);
 
     let era_execution_result = node
-        .run_l2_tx_inner(
-            l2_tx,
-            multivm::interface::TxExecutionMode::VerifyExecute,
-        )
+        .run_l2_tx_inner(l2_tx, multivm::interface::TxExecutionMode::VerifyExecute)
         .unwrap();
 
-    let (modified_keys, tx_result, _call_traces, _block, bytecodes, _block_ctx) = era_execution_result;
+    let (modified_keys, tx_result, _call_traces, _block, bytecodes, _block_ctx) =
+        era_execution_result;
     let maybe_contract_address = contract_address_from_tx_result(&tx_result);
 
     let execution_result = match tx_result.result {
@@ -205,23 +198,22 @@ where
                     maybe_contract_address.map(|address| h160_to_address(address)),
                 ),
             }
-        },
+        }
         multivm::interface::ExecutionResult::Revert { output, .. } => {
             revm::primitives::ExecutionResult::Revert {
                 gas_used: env.tx.gas_limit - tx_result.refunds.gas_refunded as u64,
                 output: Bytes::new(), // FIXME (function results)
             }
-        },
+        }
         multivm::interface::ExecutionResult::Halt { reason, .. } => {
-            // You will need to decide what to do in the case of a halt. This might depend on the reason for the halt.
-            // For now, let's assume you're constructing a Revert with an empty output.
+            // Need to decide what to do in the case of a halt. This might depend on the reason for the halt.
+            // TODO: FIXME
             revm::primitives::ExecutionResult::Revert {
-                gas_used: env.tx.gas_limit, // assuming full gas usage on halt, adjust as necessary
+                gas_used: env.tx.gas_limit,
                 output: Bytes::new(), // FIXME (function results)
             }
-        },
+        }
     };
-    
 
     let account_to_keys: HashMap<H160, HashMap<StorageKey, H256>> =
         modified_keys
@@ -278,12 +270,11 @@ where
                 era_db.fetch_account_code(account.clone(), &modified_keys, &bytecodes);
 
             let code_hash = match &account_code {
-                Some(bytecode) => {
-                    revm_keccak256(bytecode.bytes()) 
-                }
+                Some(bytecode) => revm_keccak256(bytecode.bytes()),
                 None => {
+                    // TODO: FIXME
                     // Handle the case when there's no bytecode
-                    KECCAK_EMPTY 
+                    KECCAK_EMPTY
                 }
             };
 

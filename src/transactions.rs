@@ -1,4 +1,4 @@
-use era_test_node::{fork::ForkDetails, observability::{Observability, LogLevel}, node::{InMemoryNode, InMemoryNodeConfig, ShowCalls, ShowStorageLogs, ShowVMDetails, ShowGasDetails}, system_contracts};
+use era_test_node::{fork::ForkDetails, node::{InMemoryNode, InMemoryNodeConfig, ShowCalls, ShowStorageLogs, ShowVMDetails, ShowGasDetails}, system_contracts};
 use multivm::interface::VmExecutionResultAndLogs;
 use revm::{
     primitives::{
@@ -7,7 +7,6 @@ use revm::{
     },
     Database,
 };
-use tracing_subscriber::filter::LevelFilter;
 use std::{
     collections::{HashMap, HashSet},
     fmt::Debug,
@@ -164,7 +163,6 @@ where
         31337
     };
     println!("*** Using chain_id: {:?}", chain_id_u32);
-    println!("CHAINID:::   {:?} ", Some(L2ChainId::from(chain_id_u32)));
     let fork_details = ForkDetails {
         fork_source: &era_db,
         l1_block: L1BatchNumber(num as u32),
@@ -177,11 +175,6 @@ where
         l1_gas_price: u64::max(env.block.basefee.to::<u64>(), 1000),
     };
 
-    let log_level_filter = LevelFilter::from(LogLevel::Debug);
-    let log_file = File::create("./log_era-revm").unwrap();
-
-    // Initialize the tracing subscriber
-    let observability = Observability::init(String::from("era_test_node"), log_level_filter, log_file).unwrap();
     let config = InMemoryNodeConfig {
         show_calls: ShowCalls::All,
         show_storage_logs: ShowStorageLogs::All,
@@ -190,7 +183,7 @@ where
         resolve_hashes: false,  
         system_contracts_options: system_contracts::Options::BuiltInWithoutSecurity,
     };
-    let node = InMemoryNode::new(Some(fork_details), Some(observability), config);
+    let node = InMemoryNode::new(Some(fork_details), None, config);
 
     let l2_tx = tx_env_to_era_tx(env.tx.clone(), nonces);
 

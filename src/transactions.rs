@@ -178,6 +178,8 @@ where
 
     let l2_tx = tx_env_to_era_tx(env.tx.clone(), nonces);
 
+    println!("*** L2 TX SIGNATURE22222: {:?}", l2_tx.common_data.signature);
+
     let era_execution_result = node
         .run_l2_tx_inner(
             l2_tx,

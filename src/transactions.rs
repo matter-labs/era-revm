@@ -181,9 +181,9 @@ where
     };
 
     let config = InMemoryNodeConfig {
-        show_calls: ShowCalls::All,
-        show_storage_logs: ShowStorageLogs::All,
-        show_vm_details: ShowVMDetails::All,
+        show_calls: ShowCalls::None,
+        show_storage_logs: ShowStorageLogs::None,
+        show_vm_details: ShowVMDetails::None,
         show_gas_details: ShowGasDetails::None,
         resolve_hashes: false,
         system_contracts_options: system_contracts::Options::BuiltInWithoutSecurity,
@@ -193,6 +193,8 @@ where
     let mut l2_tx = tx_env_to_era_tx(env.tx.clone(), nonces);
 
     if l2_tx.common_data.signature.is_empty() {
+        // FIXME: This is a hack to make sure that the signature is not empty.
+        // Fails without a signature here: https://github.com/matter-labs/zksync-era/blob/73a1e8ff564025d06e02c2689da238ae47bb10c3/core/lib/types/src/transaction_request.rs#L381
         l2_tx.common_data.signature = PackedEthSignature::default().serialize_packed().into();
     }
 
@@ -226,10 +228,7 @@ where
         multivm::interface::ExecutionResult::Halt { .. } => {
             // Need to decide what to do in the case of a halt. This might depend on the reason for the halt.
             // TODO: FIXME
-            revm::primitives::ExecutionResult::Revert {
-                gas_used: env.tx.gas_limit,
-                output: Bytes::new(), // FIXME (function results)
-            }
+            panic!()
         }
     };
 

@@ -1,9 +1,15 @@
-use era_test_node::{fork::ForkDetails, node::{InMemoryNode, InMemoryNodeConfig, ShowCalls, ShowStorageLogs, ShowVMDetails, ShowGasDetails}, system_contracts};
+use era_test_node::{
+    fork::ForkDetails,
+    node::{
+        InMemoryNode, InMemoryNodeConfig, ShowCalls, ShowGasDetails, ShowStorageLogs, ShowVMDetails,
+    },
+    system_contracts,
+};
 use multivm::interface::VmExecutionResultAndLogs;
 use revm::{
     primitives::{
         keccak256 as revm_keccak256, Account, AccountInfo, Address, Bytes, EVMResult, Env, Eval,
-        ExecutionResult, HashMap as rHashMap, ResultAndState, StorageSlot, TxEnv, KECCAK_EMPTY,
+        HashMap as rHashMap, ResultAndState, StorageSlot, TxEnv, KECCAK_EMPTY,
     },
     Database,
 };
@@ -12,11 +18,10 @@ use std::{
     fmt::Debug,
     sync::{Arc, Mutex},
 };
-use std::fs::File;
-use zksync_basic_types::{web3::signing::keccak256, L1BatchNumber, H160, H256, U256};
-use zksync_types::api::{Block, BridgeAddresses, Transaction, TransactionVariant};
+use zksync_basic_types::{web3::signing::keccak256, L1BatchNumber, L2ChainId, H160, H256, U256};
+use zksync_types::api::Block;
 use zksync_types::{
-    fee::Fee, l2::L2Tx, transaction_request::PaymasterParams, L2ChainId, StorageKey,
+    fee::Fee, l2::L2Tx, transaction_request::PaymasterParams, PackedEthSignature, StorageKey,
     StorageLogQueryType, ACCOUNT_CODE_STORAGE_ADDRESS,
 };
 
@@ -156,14 +161,13 @@ where
     env.block.number = u256_to_revm_u256(U256::from(num));
     env.block.timestamp = u256_to_revm_u256(U256::from(ts));
 
-    println!("*** chain_id: {:?}", env.cfg.chain_id);
     let chain_id_u32 = if env.cfg.chain_id <= u32::MAX as u64 {
         env.cfg.chain_id as u32
     } else {
         // TODO: FIXME
         31337
     };
-    println!("*** Using chain_id: {:?}", chain_id_u32);
+
     let fork_details = ForkDetails {
         fork_source: &era_db,
         l1_block: L1BatchNumber(num as u32),
@@ -171,7 +175,7 @@ where
         l2_miniblock: num,
         l2_miniblock_hash: Default::default(),
         block_timestamp: ts,
-        overwrite_chain_id: None,
+        overwrite_chain_id: Some(L2ChainId::from(chain_id_u32)),
         // Make sure that l1 gas price is set to reasonable values.
         l1_gas_price: u64::max(env.block.basefee.to::<u64>(), 1000),
     };
@@ -181,12 +185,16 @@ where
         show_storage_logs: ShowStorageLogs::All,
         show_vm_details: ShowVMDetails::All,
         show_gas_details: ShowGasDetails::None,
-        resolve_hashes: false,  
+        resolve_hashes: false,
         system_contracts_options: system_contracts::Options::BuiltInWithoutSecurity,
     };
     let node = InMemoryNode::new(Some(fork_details), None, config);
 
-    let l2_tx = tx_env_to_era_tx(env.tx.clone(), nonces);
+    let mut l2_tx = tx_env_to_era_tx(env.tx.clone(), nonces);
+
+    if l2_tx.common_data.signature.is_empty() {
+        l2_tx.common_data.signature = PackedEthSignature::default().serialize_packed().into();
+    }
 
     let era_execution_result = node
         .run_l2_tx_inner(l2_tx, multivm::interface::TxExecutionMode::VerifyExecute)
@@ -197,7 +205,7 @@ where
     let maybe_contract_address = contract_address_from_tx_result(&tx_result);
 
     let execution_result = match tx_result.result {
-        multivm::interface::ExecutionResult::Success { output, .. } => {
+        multivm::interface::ExecutionResult::Success { .. } => {
             revm::primitives::ExecutionResult::Success {
                 reason: Eval::Return,
                 gas_used: env.tx.gas_limit - tx_result.refunds.gas_refunded as u64,
@@ -209,13 +217,13 @@ where
                 ),
             }
         }
-        multivm::interface::ExecutionResult::Revert { output, .. } => {
+        multivm::interface::ExecutionResult::Revert { .. } => {
             revm::primitives::ExecutionResult::Revert {
                 gas_used: env.tx.gas_limit - tx_result.refunds.gas_refunded as u64,
                 output: Bytes::new(), // FIXME (function results)
             }
         }
-        multivm::interface::ExecutionResult::Halt { reason, .. } => {
+        multivm::interface::ExecutionResult::Halt { .. } => {
             // Need to decide what to do in the case of a halt. This might depend on the reason for the halt.
             // TODO: FIXME
             revm::primitives::ExecutionResult::Revert {

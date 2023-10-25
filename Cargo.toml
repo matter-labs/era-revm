@@ -1,21 +1,14 @@
 [package]
 name = "era_revm"
-version = "0.1.0"
+version = "0.0.1-alpha"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-
-revm = { git = "https://github.com/dutterbutter/revm.git", branch = "db/release_v26_sha3_0.10.6" }
-#revm = { version = "2.3", default-features = false, features = [
-#  "std",
-#  "k256",
-#  "with-serde",
-#  "memory_limit",
-#  "optional_eip3607"
-#] }
-
+# Using a fork of revm as zksync-era requires the usage of sha3 0.10.6, and the latest revm uses 0.10.8
+revm = { git = "https://github.com/dutterbutter/revm.git", tag = "sha3_0.10.6" }
+# TODO: Update to latest era-test-node tag once it is released
 era_test_node = {git = "https://github.com/matter-labs/era-test-node.git", branch = "db/update-to-latest" }
 zksync_basic_types = { git = "https://github.com/matter-labs/zksync-era.git", rev = "73a1e8ff564025d06e02c2689da238ae47bb10c3" }
 zksync_types = { git = "https://github.com/matter-labs/zksync-era.git", rev = "73a1e8ff564025d06e02c2689da238ae47bb10c3" }

@@ -12,6 +12,7 @@ use std::{
 
 use crate::conversion_utils::{h256_to_b256, h256_to_h160};
 use era_test_node::fork::ForkSource;
+use eyre::ErrReport;
 use revm::{
     primitives::{Bytecode, Bytes},
     Database,
@@ -20,14 +21,14 @@ use zksync_basic_types::{
     web3::signing::keccak256, AccountTreeId, MiniblockNumber, H160, H256, U256,
 };
 use zksync_types::{
-    api::{BlockIdVariant, Transaction},
+    api::{BlockIdVariant, Transaction, TransactionDetails},
     StorageKey, ACCOUNT_CODE_STORAGE_ADDRESS, L2_ETH_TOKEN_ADDRESS, NONCE_HOLDER_ADDRESS,
     SYSTEM_CONTEXT_ADDRESS,
 };
 
 use zksync_utils::{address_to_h256, h256_to_u256, u256_to_h256};
 
-use crate::conversion_utils::{h160_to_b160, revm_u256_to_h256, u256_to_revm_u256};
+use crate::conversion_utils::{h160_to_address, revm_u256_to_h256, u256_to_revm_u256};
 pub struct RevmDatabaseForEra<DB> {
     pub db: Arc<Mutex<Box<DB>>>,
 }
@@ -70,7 +71,7 @@ where
     fn read_storage_internal(&self, address: H160, idx: U256) -> H256 {
         let mut db = self.db.lock().unwrap();
         let result = db
-            .storage(h160_to_b160(address), u256_to_revm_u256(idx))
+            .storage(h160_to_address(address), u256_to_revm_u256(idx))
             .unwrap();
         revm_u256_to_h256(result)
     }
@@ -99,7 +100,6 @@ where
 
             return Some(Bytecode {
                 bytecode: Bytes::copy_from_slice(&u8_bytecode.as_slice()),
-                hash: h256_to_b256(new_bytecode_hash),
                 state: revm::primitives::BytecodeState::Raw,
             });
         }
@@ -112,21 +112,19 @@ where
                 let u8_bytecode: Vec<u8> = v
                     .iter()
                     .flat_map(|x| u256_to_h256(x.clone()).to_fixed_bytes())
-                    //.cloned()
                     .collect();
 
                 return Some(Bytecode {
                     bytecode: Bytes::copy_from_slice(&u8_bytecode.as_slice()),
-                    hash: h256_to_b256(u256_to_h256(*k)),
                     state: revm::primitives::BytecodeState::Raw,
                 });
             }
         }
 
-        let b160_account = h160_to_b160(account);
+        let account = h160_to_address(account);
 
         let mut db = self.db.lock().unwrap();
-        db.basic(b160_account)
+        db.basic(account)
             .ok()
             .map(|db_account| db_account.map(|x| x.code))
             .flatten()
@@ -187,6 +185,67 @@ where
     }
 
     fn get_transaction_by_hash(&self, _hash: H256) -> eyre::Result<Option<Transaction>> {
+        todo!()
+    }
+
+    fn get_transaction_details(
+        &self,
+        _hash: H256,
+    ) -> Result<std::option::Option<TransactionDetails>, ErrReport> {
+        todo!()
+    }
+
+    fn get_block_by_hash(
+        &self,
+        _hash: H256,
+        _full_transactions: bool,
+    ) -> eyre::Result<Option<zksync_types::api::Block<zksync_types::api::TransactionVariant>>> {
+        todo!()
+    }
+
+    fn get_block_by_number(
+        &self,
+        _block_number: zksync_types::api::BlockNumber,
+        _full_transactions: bool,
+    ) -> eyre::Result<Option<zksync_types::api::Block<zksync_types::api::TransactionVariant>>> {
+        todo!()
+    }
+
+    fn get_block_details(
+        &self,
+        _miniblock: MiniblockNumber,
+    ) -> eyre::Result<Option<zksync_types::api::BlockDetails>> {
+        todo!()
+    }
+
+    fn get_block_transaction_count_by_hash(&self, _block_hash: H256) -> eyre::Result<Option<U256>> {
+        todo!()
+    }
+
+    fn get_block_transaction_count_by_number(
+        &self,
+        _block_number: zksync_types::api::BlockNumber,
+    ) -> eyre::Result<Option<U256>> {
+        todo!()
+    }
+
+    fn get_transaction_by_block_hash_and_index(
+        &self,
+        _block_hash: H256,
+        _index: zksync_basic_types::web3::types::Index,
+    ) -> eyre::Result<Option<Transaction>> {
+        todo!()
+    }
+
+    fn get_transaction_by_block_number_and_index(
+        &self,
+        _block_number: zksync_types::api::BlockNumber,
+        _index: zksync_basic_types::web3::types::Index,
+    ) -> eyre::Result<Option<Transaction>> {
+        todo!()
+    }
+
+    fn get_bridge_contracts(&self) -> eyre::Result<zksync_types::api::BridgeAddresses> {
         todo!()
     }
 }

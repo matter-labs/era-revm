@@ -248,4 +248,12 @@ where
     fn get_bridge_contracts(&self) -> eyre::Result<zksync_types::api::BridgeAddresses> {
         todo!()
     }
+
+    fn get_confirmed_tokens(
+        &self,
+        _from: u32,
+        _limit: u8,
+    ) -> eyre::Result<Vec<zksync_web3_decl::types::Token>> {
+        todo!()
+    }
 }

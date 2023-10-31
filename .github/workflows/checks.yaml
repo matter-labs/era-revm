@@ -40,7 +40,7 @@ jobs:
           toolchain: nightly-2023-07-23
 
       - name: Build Code
-        run: make all
+        run: make rust-build
 
       - name: Create artifact
         run: |

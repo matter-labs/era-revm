@@ -69,4 +69,4 @@ Remember, the best contributions come from enjoying the process, being respectfu
 
 ---
 
-*Last updated: Tues 31, 2023*
+*Last updated: Tues October 31, 2023*

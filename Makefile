@@ -1,4 +1,5 @@
 # Build the Rust project
+.PHONY: rust-build
 rust-build:
 	cargo build --release
 
@@ -7,6 +8,7 @@ rust-doc:
 	cargo doc --no-deps --open
 
 # Lint checks for Rust code
+.PHONY: lint
 lint:
 	cargo fmt --all -- --check
 	cargo clippy -p era_revm -Zunstable-options -- -D warnings --allow clippy::unwrap_used
@@ -17,7 +19,6 @@ lint-fix:
 	cargo fmt
 
 # Run unit tests for Rust code
+.PHONY: test
 test:
 	cargo test
-
-.PHONY: rust-build lint test

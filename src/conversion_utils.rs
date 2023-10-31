@@ -68,7 +68,10 @@ mod test {
             H256::from_str("0xb99acb716b354b9be88d3eaba99ad36792ccdd4349404cbb812adf0b0b14d601")
                 .unwrap();
         let b = h256_to_b256(h);
-        assert_eq!(b.to_string(), "0xb99a…d601");
+        assert_eq!(
+            b.to_string(),
+            "0xb99acb716b354b9be88d3eaba99ad36792ccdd4349404cbb812adf0b0b14d601"
+        );
         let u = h256_to_u256(h);
         assert_eq!(
             u.to_string(),

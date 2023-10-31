@@ -29,7 +29,7 @@ impl PackedEraBytecode {
     pub fn to_vec(&self) -> Vec<u8> {
         serde_json::to_vec(self).unwrap()
     }
-    pub fn from_vec(input: &Vec<u8>) -> Self {
+    pub fn from_vec(input: &[u8]) -> Self {
         serde_json::from_slice(input).unwrap()
     }
     pub fn bytecode(&self) -> Vec<u8> {

@@ -91,15 +91,15 @@ where
             AccountTreeId::new(ACCOUNT_CODE_STORAGE_ADDRESS),
             address_to_h256(&account),
         )) {
-            let new_bytecode_hash = v.clone();
+            let new_bytecode_hash = *v;
             let new_bytecode = bytecodes.get(&h256_to_u256(new_bytecode_hash)).unwrap();
             let u8_bytecode: Vec<u8> = new_bytecode
                 .iter()
-                .flat_map(|x| u256_to_h256(x.clone()).to_fixed_bytes())
+                .flat_map(|x| u256_to_h256(*x).to_fixed_bytes())
                 .collect();
 
             return Some(Bytecode {
-                bytecode: Bytes::copy_from_slice(&u8_bytecode.as_slice()),
+                bytecode: Bytes::copy_from_slice(u8_bytecode.as_slice()),
                 state: revm::primitives::BytecodeState::Raw,
             });
         }
@@ -108,14 +108,14 @@ where
         // Unfortunately the accounts are mapped as "last 20 bytes of the 32 byte hash".
         // so we have to iterate over all the bytecodes, truncate their hash and then compare.
         for (k, v) in bytecodes {
-            if h256_to_h160(&u256_to_h256(k.clone())) == account {
+            if h256_to_h160(&u256_to_h256(*k)) == account {
                 let u8_bytecode: Vec<u8> = v
                     .iter()
-                    .flat_map(|x| u256_to_h256(x.clone()).to_fixed_bytes())
+                    .flat_map(|x| u256_to_h256(*x).to_fixed_bytes())
                     .collect();
 
                 return Some(Bytecode {
-                    bytecode: Bytes::copy_from_slice(&u8_bytecode.as_slice()),
+                    bytecode: Bytes::copy_from_slice(u8_bytecode.as_slice()),
                     state: revm::primitives::BytecodeState::Raw,
                 });
             }
@@ -126,8 +126,7 @@ where
         let mut db = self.db.lock().unwrap();
         db.basic(account)
             .ok()
-            .map(|db_account| db_account.map(|x| x.code))
-            .flatten()
+            .and_then(|db_account| db_account.map(|x| x.code))
             .flatten()
     }
 }
@@ -145,16 +144,13 @@ where
         // We cannot support historical lookups. Only the most recent block is supported.
         if let Some(block) = &block {
             match block {
-                BlockIdVariant::BlockNumber(number) => match number {
-                    zksync_types::api::BlockNumber::Number(num) => {
-                        let (current_block_number, _) = self.block_number_and_timestamp();
+                BlockIdVariant::BlockNumber(zksync_types::api::BlockNumber::Number(num)) => {
+                    let (current_block_number, _) = self.block_number_and_timestamp();
 
-                        if num.as_u64() != current_block_number {
-                            eyre::bail!("Only fetching of the most recent block {} is supported - but queried for {}", current_block_number, num)
-                        }
+                    if num.as_u64() != current_block_number {
+                        eyre::bail!("Only fetching of the most recent block {} is supported - but queried for {}", current_block_number, num)
                     }
-                    _ => eyre::bail!("Only fetching most recent block is implemented"),
-                },
+                }
                 _ => eyre::bail!("Only fetching most recent block is implemented"),
             }
         }
@@ -166,7 +162,7 @@ where
             // Unfortunately the 'idx' here is a hash of the account and Database doesn't
             // support getting a list of active accounts.
             // So for now - simply assume that every user has infinite money.
-            result = u256_to_h256(U256::from(9_223_372_036_854_775_808 as u64));
+            result = u256_to_h256(U256::from(9_223_372_036_854_775_808_u64));
         }
         Ok(result)
     }

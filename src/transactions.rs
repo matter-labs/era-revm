@@ -101,7 +101,7 @@ pub fn tx_env_to_era_tx(tx_env: TxEnv, nonce: u64) -> L2Tx {
         ),
         revm::primitives::TransactTo::Create(_scheme) => {
             // TODO: support create / create2.
-            let packed_bytecode = PackedEraBytecode::from_vec(&tx_env.data.to_vec());
+            let packed_bytecode = PackedEraBytecode::from_vec(tx_env.data.as_ref());
             L2Tx::new(
                 H160::from_low_u64_be(0x8006),
                 encode_deploy_params_create(
@@ -215,7 +215,7 @@ where
                 logs: vec![],
                 output: revm::primitives::Output::Create(
                     Bytes::new(), // FIXME (function results)
-                    maybe_contract_address.map(|address| h160_to_address(address)),
+                    maybe_contract_address.map(h160_to_address),
                 ),
             }
         }
@@ -237,7 +237,7 @@ where
             .iter()
             .fold(HashMap::new(), |mut acc, (storage_key, value)| {
                 acc.entry(*storage_key.address())
-                    .or_insert_with(HashMap::new)
+                    .or_default()
                     .insert(*storage_key, *value);
                 acc
             });
@@ -246,17 +246,17 @@ where
     let mut accounts_touched: HashSet<H160> = Default::default();
     // All accounts where storage was modified.
     for x in account_to_keys.keys() {
-        accounts_touched.insert(x.clone());
+        accounts_touched.insert(*x);
     }
     // Also insert 'fake' accounts for bytecodes (to make sure that factory bytecodes get persisted).
-    for (k, _) in &bytecodes {
+    for k in bytecodes.keys() {
         accounts_touched.insert(h256_to_h160(&u256_to_h256(*k)));
     }
 
     let account_code_storage = ACCOUNT_CODE_STORAGE_ADDRESS;
 
     if let Some(account_bytecodes) = account_to_keys.get(&account_code_storage) {
-        for (k, _) in account_bytecodes {
+        for k in account_bytecodes.keys() {
             let account_address = H160::from_slice(&k.key().0[12..32]);
             accounts_touched.insert(account_address);
         }
@@ -283,8 +283,7 @@ where
                         .collect()
                 });
 
-            let account_code =
-                era_db.fetch_account_code(account.clone(), &modified_keys, &bytecodes);
+            let account_code = era_db.fetch_account_code(*account, &modified_keys, &bytecodes);
 
             let code_hash = match &account_code {
                 Some(bytecode) => revm_keccak256(bytecode.bytes()),

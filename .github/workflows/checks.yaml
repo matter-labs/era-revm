@@ -42,14 +42,3 @@ jobs:
 
       - name: Build Code
         run: make rust-build
-
-      - name: Create artifact
-        run: |
-          cd ./target/release
-          tar -czf era_revm-${{ matrix.os }}.tar.gz ./era_revm*
-
-      - name:  Upload artifact
-        uses:  actions/upload-artifact@v3
-        with:
-          name: era_revm-${{ matrix.os }}.tar.gz
-          path: ./target/release/era_revm-${{ matrix.os }}.tar.gz

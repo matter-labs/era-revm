@@ -237,7 +237,7 @@ where
                     multivm::interface::Halt::NotEnoughGasProvided => {
                         Halt::OutOfGas(OutOfGasError::BasicOutOfGas)
                     }
-                    _ => Halt::InvalidJump,
+                    _ => panic!("HALT: {}", reason),
                 },
                 gas_used: env.tx.gas_limit - tx_result.refunds.gas_refunded as u64,
             }
@@ -329,25 +329,57 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::testing::MockDatabase;
+    use crate::{factory_deps::hash_bytecode, testing::MockDatabase};
 
     use super::*;
 
     #[test]
-    fn test_env_number_and_timestamp_is_incremented_after_transaction() {
+    fn test_env_number_and_timestamp_is_incremented_after_transaction_and_marks_storage_as_touched()
+    {
         let mut env = Env::default();
 
         env.block.number = rU256::from(0);
         env.block.timestamp = rU256::from(0);
 
+        env.tx = TxEnv {
+            caller: Address(H160::repeat_byte(0x1).to_fixed_bytes().into()),
+            gas_limit: 1_000_000,
+            gas_price: rU256::from(250_000_000),
+            transact_to: revm::primitives::TransactTo::Create(
+                revm::primitives::CreateScheme::Create,
+            ),
+            value: Default::default(),
+            data: serde_json::to_vec(&PackedEraBytecode::new(
+                hex::encode(hash_bytecode(&[0; 32])),
+                hex::encode([0; 32]),
+                vec![hex::encode([0; 32])],
+            ))
+            .unwrap()
+            .into(),
+            nonce: Default::default(),
+            chain_id: Default::default(),
+            access_list: Default::default(),
+            gas_priority_fee: Default::default(),
+            blob_hashes: Default::default(),
+            max_fee_per_blob_gas: Default::default(),
+        };
+
         let res =
             run_era_transaction::<_, ResultAndState, _>(&mut env, &mut MockDatabase::default(), ())
                 .expect("failed executing");
 
-        assert!(matches!(
-            res.result,
-            revm::primitives::ExecutionResult::Halt { .. }
-        ));
+        assert!(
+            !res.state.is_empty(),
+            "unexpected failure: no states were touched"
+        );
+        for (address, account) in res.state {
+            assert!(
+                account.is_touched(),
+                "unexpected failure:  account {} was not marked as touched; it will not be updated",
+                address
+            );
+        }
+
         assert_eq!(1, env.block.number.to::<u64>());
         assert_eq!(1, env.block.timestamp.to::<u64>());
     }

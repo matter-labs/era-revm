@@ -8,8 +8,8 @@ use era_test_node::{
 use multivm::interface::VmExecutionResultAndLogs;
 use revm::{
     primitives::{
-        keccak256 as revm_keccak256, Account, AccountInfo, Address, Bytes, EVMResult, Env, Eval,
-        HashMap as rHashMap, ResultAndState, StorageSlot, TxEnv, KECCAK_EMPTY,
+        Account, AccountInfo, Address, Bytes, EVMResult, Env, Eval, Halt, HashMap as rHashMap,
+        OutOfGasError, ResultAndState, StorageSlot, TxEnv, B256, KECCAK_EMPTY, U256 as rU256,
     },
     Database,
 };
@@ -31,7 +31,6 @@ use zksync_utils::{h256_to_account_address, u256_to_h256};
 use crate::{
     conversion_utils::{
         address_to_h160, h160_to_address, h256_to_h160, h256_to_revm_u256, revm_u256_to_u256,
-        u256_to_revm_u256,
     },
     db::RevmDatabaseForEra,
     factory_deps::PackedEraBytecode,
@@ -139,11 +138,14 @@ where
     DB: Database + Send + 'a,
     <DB as revm::Database>::Error: Debug,
 {
+    let (num, ts) = (
+        env.block.number.to::<u64>(),
+        env.block.timestamp.to::<u64>(),
+    );
     let era_db = RevmDatabaseForEra {
         db: Arc::new(Mutex::new(Box::new(db))),
+        current_block: num,
     };
-
-    let (num, ts) = era_db.block_number_and_timestamp();
 
     let nonces = era_db.get_nonce_for_address(address_to_h160(env.tx.caller));
 
@@ -158,8 +160,8 @@ where
 
     // Update the environment timestamp and block number.
     // Check if this should be done at the end?
-    env.block.number = u256_to_revm_u256(U256::from(num));
-    env.block.timestamp = u256_to_revm_u256(U256::from(ts));
+    env.block.number = env.block.number.saturating_add(rU256::from(1));
+    env.block.timestamp = env.block.timestamp.saturating_add(rU256::from(1));
 
     let chain_id_u32 = if env.cfg.chain_id <= u32::MAX as u64 {
         env.cfg.chain_id as u32
@@ -168,13 +170,14 @@ where
         31337
     };
 
+    let (l2_num, l2_ts) = (num * 2, ts * 2);
     let fork_details = ForkDetails {
         fork_source: &era_db,
         l1_block: L1BatchNumber(num as u32),
         l2_block: Block::default(),
-        l2_miniblock: num,
+        l2_miniblock: l2_num,
         l2_miniblock_hash: Default::default(),
-        block_timestamp: ts,
+        block_timestamp: l2_ts,
         overwrite_chain_id: Some(L2ChainId::from(chain_id_u32)),
         // Make sure that l1 gas price is set to reasonable values.
         l1_gas_price: u64::max(env.block.basefee.to::<u64>(), 1000),
@@ -199,7 +202,7 @@ where
     }
 
     let era_execution_result = node
-        .run_l2_tx_inner(l2_tx, multivm::interface::TxExecutionMode::VerifyExecute)
+        .run_l2_tx_raw(l2_tx, multivm::interface::TxExecutionMode::VerifyExecute)
         .unwrap();
 
     let (modified_keys, tx_result, _call_traces, _block, bytecodes, _block_ctx) =
@@ -225,10 +228,19 @@ where
                 output: Bytes::new(), // FIXME (function results)
             }
         }
-        multivm::interface::ExecutionResult::Halt { .. } => {
+        multivm::interface::ExecutionResult::Halt { reason } => {
             // Need to decide what to do in the case of a halt. This might depend on the reason for the halt.
             // TODO: FIXME
-            panic!()
+            tracing::error!("tx execution halted: {}", reason);
+            revm::primitives::ExecutionResult::Halt {
+                reason: match reason {
+                    multivm::interface::Halt::NotEnoughGasProvided => {
+                        Halt::OutOfGas(OutOfGasError::BasicOutOfGas)
+                    }
+                    _ => panic!("HALT: {}", reason),
+                },
+                gas_used: env.tx.gas_limit - tx_result.refunds.gas_refunded as u64,
+            }
         }
     };
 
@@ -285,15 +297,12 @@ where
 
             let account_code = era_db.fetch_account_code(*account, &modified_keys, &bytecodes);
 
-            let code_hash = match &account_code {
-                Some(bytecode) => revm_keccak256(bytecode.bytes()),
-                None => {
-                    println!("*** No bytecode for account: {:?}", account);
-                    // TODO: FIXME
-                    // Handle the case when there's no bytecode
-                    KECCAK_EMPTY
-                }
-            };
+            let (code_hash, code) = account_code
+                .map(|(hash, bytecode)| (B256::from(&hash.0), Some(bytecode)))
+                .unwrap_or((KECCAK_EMPTY, None));
+            if code.is_none() {
+                println!("*** No bytecode for account: {:?}", account);
+            }
 
             (
                 acc,
@@ -302,10 +311,10 @@ where
                         balance: revm::primitives::U256::ZERO, // FIXME
                         nonce: era_db.get_nonce_for_address(*account),
                         code_hash,
-                        code: account_code,
+                        code,
                     },
                     storage: storage.unwrap_or_default(),
-                    status: revm::primitives::AccountStatus::LoadedAsNotExisting,
+                    status: revm::primitives::AccountStatus::Touched,
                 },
             )
         })
@@ -315,4 +324,62 @@ where
         result: execution_result,
         state,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{factory_deps::hash_bytecode, testing::MockDatabase};
+
+    use super::*;
+
+    #[test]
+    fn test_env_number_and_timestamp_is_incremented_after_transaction_and_marks_storage_as_touched()
+    {
+        let mut env = Env::default();
+
+        env.block.number = rU256::from(0);
+        env.block.timestamp = rU256::from(0);
+
+        env.tx = TxEnv {
+            caller: Address(H160::repeat_byte(0x1).to_fixed_bytes().into()),
+            gas_limit: 1_000_000,
+            gas_price: rU256::from(250_000_000),
+            transact_to: revm::primitives::TransactTo::Create(
+                revm::primitives::CreateScheme::Create,
+            ),
+            value: Default::default(),
+            data: serde_json::to_vec(&PackedEraBytecode::new(
+                hex::encode(hash_bytecode(&[0; 32])),
+                hex::encode([0; 32]),
+                vec![hex::encode([0; 32])],
+            ))
+            .unwrap()
+            .into(),
+            nonce: Default::default(),
+            chain_id: Default::default(),
+            access_list: Default::default(),
+            gas_priority_fee: Default::default(),
+            blob_hashes: Default::default(),
+            max_fee_per_blob_gas: Default::default(),
+        };
+
+        let res =
+            run_era_transaction::<_, ResultAndState, _>(&mut env, &mut MockDatabase::default(), ())
+                .expect("failed executing");
+
+        assert!(
+            !res.state.is_empty(),
+            "unexpected failure: no states were touched"
+        );
+        for (address, account) in res.state {
+            assert!(
+                account.is_touched(),
+                "unexpected failure:  account {} was not marked as touched; it will not be updated",
+                address
+            );
+        }
+
+        assert_eq!(1, env.block.number.to::<u64>());
+        assert_eq!(1, env.block.timestamp.to::<u64>());
+    }
 }

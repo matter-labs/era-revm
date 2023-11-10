@@ -60,10 +60,17 @@ jobs:
         RUST_BACKTRACE: full
       run: |
         pwd
+        echo parent dir
         cd ..
         pwd
         ls -l
+        cd -
+        echo test dir
         ls -l ../$TEST_REPO_DR
+        echo this dir
+        pwd
+        ls -l
+        echo smoketest
         git clone https://github.com/matter-labs/zkfoundry-smoke-test
         cd zkfoundry-smoke-test
         git fetch && git checkout nish-add-test

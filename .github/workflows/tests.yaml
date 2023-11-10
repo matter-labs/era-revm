@@ -62,16 +62,11 @@ jobs:
         echo this dir  
         pwd
         ls -l
-        echo parent dir
-        cd ..
-        pwd
-        ls -l
-        cd -
-        echo test dir
-        ls -l ../$TEST_REPO_DIR
+        echo test dir: ${TEST_REPO_DIR}
+        ls -l ${TEST_REPO_DIR}
         echo smoketest
         git clone https://github.com/matter-labs/zkfoundry-smoke-test
         cd zkfoundry-smoke-test
         git fetch && git checkout nish-add-test
         ls -l
-        ./smoke-test.sh
+        TEST_REPO_DIR=../$TEST_REPO_DIR ./smoke-test.sh

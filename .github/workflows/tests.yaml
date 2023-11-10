@@ -59,17 +59,16 @@ jobs:
         TEST_REPO_DIR: "${{ env.TEST_REPO_DIR }}"
         RUST_BACKTRACE: full
       run: |
+        echo this dir  
         pwd
+        ls -l
         echo parent dir
         cd ..
         pwd
         ls -l
         cd -
         echo test dir
-        ls -l ../$TEST_REPO_DR
-        echo this dir
-        pwd
-        ls -l
+        ls -l ../$TEST_REPO_DIR
         echo smoketest
         git clone https://github.com/matter-labs/zkfoundry-smoke-test
         cd zkfoundry-smoke-test

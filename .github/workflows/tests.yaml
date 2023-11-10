@@ -64,4 +64,4 @@ jobs:
         ls -l
         git fetch && git checkout nish-add-test && git pull
         ls -l
-        ./smoke-test
+        ./smoke-test.sh

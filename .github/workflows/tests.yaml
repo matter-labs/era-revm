@@ -34,10 +34,7 @@ jobs:
   
   smoke-test:
     name: smoke-test
-    strategy:
-      matrix:
-        platform: [macos-latest, ubuntu-22.04-github-hosted-16core]
-    runs-on: ${{ matrix.platform }}
+    runs-on: ubuntu-22.04-github-hosted-16core
     env:
       TEST_REPO_DIR: test-repo
 
@@ -56,17 +53,9 @@ jobs:
     - name: Run smoke-test
       env:
         TEST_REPO: ${{ github.event.repository.name }}
-        TEST_REPO_DIR: "${{ env.TEST_REPO_DIR }}"
+        TEST_REPO_DIR: "../${{ env.TEST_REPO_DIR }}"
         RUST_BACKTRACE: full
       run: |
-        echo this dir  
-        pwd
-        ls -l
-        echo test dir: ${TEST_REPO_DIR}
-        ls -l ${TEST_REPO_DIR}
-        echo smoketest
         git clone https://github.com/matter-labs/zkfoundry-smoke-test
         cd zkfoundry-smoke-test
-        git fetch && git checkout nish-add-test
-        ls -l
-        TEST_REPO_DIR=../$TEST_REPO_DIR ./smoke-test.sh
+        ./smoke-test.sh

@@ -59,10 +59,13 @@ jobs:
         TEST_REPO_DIR: "${{ env.TEST_REPO_DIR }}"
         RUST_BACKTRACE: full
       run: |
+        pwd
+        cd ..
+        pwd
         ls -l
         ls -l ../$TEST_REPO_DR
         git clone https://github.com/matter-labs/zkfoundry-smoke-test
         cd zkfoundry-smoke-test
+        git fetch && git checkout nish-add-test
         ls -l
-        git fetch && git checkout nish-add-test && git pull
         ./smoke-test.sh

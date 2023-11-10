@@ -64,5 +64,5 @@ jobs:
         git clone https://github.com/matter-labs/zkfoundry-smoke-test
         cd zkfoundry-smoke-test
         ls -l
-        git fetch && git checkout nish-add-test
+        git fetch && git checkout nish-add-test && git pull
         ./smoke-test.sh

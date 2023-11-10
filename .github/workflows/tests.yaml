@@ -36,7 +36,7 @@ jobs:
     name: smoke-test
     strategy:
       matrix:
-        platform: [macos-latest, ubuntu-latest]
+        platform: [macos-latest, ubuntu-22.04-github-hosted-16core]
     runs-on: ${{ matrix.platform }}
     env:
       TEST_REPO_DIR: test-repo

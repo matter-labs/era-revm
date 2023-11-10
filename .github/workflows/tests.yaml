@@ -31,3 +31,35 @@ jobs:
         
     - name: Run tests
       run: cargo nextest run
+  
+  smoke-test:
+    name: smoke-test
+    strategy:
+      matrix:
+        platform: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.platform }}
+    env:
+      TEST_REPO_DIR: test-repo
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4 
+      with:
+        path: ${{ env.TEST_REPO_DIR }}
+        ref: ${{ github.event.pull_request.head.sha }}
+    
+    - name: Install Rust
+      uses: actions-rust-lang/setup-rust-toolchain@v1
+      with:
+        toolchain: nightly-2023-07-23
+    
+    - name: Run smoke-test
+      env:
+        TEST_REPO: ${{ github.event.repository.name }}
+        TEST_REPO_DIR: "${{ env.TEST_REPO_DIR }}"
+        RUST_BACKTRACE: full
+      run: |
+        git clone https://matter-labs/zkfoundry-smoke-test
+        cd zkfoundry-smoke-test
+        git checkout nish-add-test
+        ./smoke-test

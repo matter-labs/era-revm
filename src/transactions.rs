@@ -1,24 +1,28 @@
 use era_test_node::{
-    fork::ForkDetails,
+    fork::{ForkDetails, ForkStorage},
     node::{
         InMemoryNode, InMemoryNodeConfig, ShowCalls, ShowGasDetails, ShowStorageLogs, ShowVMDetails,
     },
     system_contracts,
 };
-use multivm::interface::VmExecutionResultAndLogs;
+use multivm::{
+    interface::VmExecutionResultAndLogs,
+    vm_latest::{HistoryDisabled, VmTracer},
+};
 use revm::{
     primitives::{
         Account, AccountInfo, Address, Bytes, EVMResult, Env, Eval, Halt, HashMap as rHashMap,
         OutOfGasError, ResultAndState, StorageSlot, TxEnv, B256, KECCAK_EMPTY, U256 as rU256,
     },
-    Database,
+    Database, DatabaseCommit,
 };
 use std::{
     collections::{HashMap, HashSet},
     fmt::Debug,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, RwLock},
 };
 use zksync_basic_types::{web3::signing::keccak256, L1BatchNumber, L2ChainId, H160, H256, U256};
+use zksync_state::StorageView;
 use zksync_types::api::Block;
 use zksync_types::{
     fee::Fee, l2::L2Tx, transaction_request::PaymasterParams, PackedEthSignature, StorageKey,
@@ -29,6 +33,7 @@ use revm::primitives::U256 as revmU256;
 use zksync_utils::{h256_to_account_address, u256_to_h256};
 
 use crate::{
+    cheatcodes::CheatcodeTracer,
     conversion_utils::{
         address_to_h160, h160_to_address, h256_to_h160, h256_to_revm_u256, revm_u256_to_u256,
     },
@@ -135,16 +140,20 @@ pub fn run_era_transaction<'a, DB, E, INSP>(
     _inspector: INSP,
 ) -> EVMResult<E>
 where
-    DB: Database + Send + 'a,
+    DB: Database + DatabaseCommit + Send + 'a,
     <DB as revm::Database>::Error: Debug,
 {
+    // let db = Box::new(db);
+    // let db = Box::leak(db);
+    // let db_box_drop = unsafe { Box::from_raw(db) };
     let (num, ts) = (
         env.block.number.to::<u64>(),
         env.block.timestamp.to::<u64>(),
     );
     let era_db = RevmDatabaseForEra {
         db: Arc::new(Mutex::new(Box::new(db))),
-        current_block: num,
+        current_block: Arc::new(RwLock::new(num)),
+        factory_deps: Default::default(),
     };
 
     let nonces = era_db.get_nonce_for_address(address_to_h160(env.tx.caller));
@@ -171,8 +180,10 @@ where
     };
 
     let (l2_num, l2_ts) = (num * 2, ts * 2);
+    // let era_db = Arc::new(&era_db);
     let fork_details = ForkDetails {
         fork_source: &era_db,
+        // fork_source: era_db.clone(),
         l1_block: L1BatchNumber(num as u32),
         l2_block: Block::default(),
         l2_miniblock: l2_num,
@@ -201,8 +212,37 @@ where
         l2_tx.common_data.signature = PackedEthSignature::default().serialize_packed().into();
     }
 
+    // let inner_era_db = era_db.clone();
+    // let era_execution_result = node
+    // .run_l2_tx_raw(
+    //     l2_tx,
+    //     multivm::interface::TxExecutionMode::VerifyExecute,
+    //     |x| {
+    //         // x.push(Box::new(CheatcodeTracer::new(inner_era_db)));
+    //     },
+    // )
+    // .unwrap();
+
+    // let x  = node.get_inner().read().unwrap().fork_storage.clone();
+    // let cheatcode_tracer = Box::new(CheatcodeTracer::new(&era_db));
+    // let cheatcode_tracer = Box::new(CheatcodeTracer::new(x));
     let era_execution_result = node
-        .run_l2_tx_raw(l2_tx, multivm::interface::TxExecutionMode::VerifyExecute)
+        .run_l2_tx_raw(
+            l2_tx,
+            multivm::interface::TxExecutionMode::VerifyExecute,
+            |s| {
+                Some(Box::new(CheatcodeTracer::new(s)))
+            }
+            // Some(vec![
+            //     cheatcode_tracer
+            //         as Box<
+            //             dyn VmTracer<
+            //                 StorageView<ForkStorage<RevmDatabaseForEra<_>>>,
+            //                 HistoryDisabled,
+            //             >,
+            //         >,
+            // ]),
+        )
         .unwrap();
 
     let (modified_keys, tx_result, _call_traces, _block, bytecodes, _block_ctx) =
@@ -363,9 +403,10 @@ mod tests {
             max_fee_per_blob_gas: Default::default(),
         };
 
-        let res =
-            run_era_transaction::<_, ResultAndState, _>(&mut env, &mut MockDatabase::default(), ())
-                .expect("failed executing");
+        let mut db2 = MockDatabase::default();
+        let db = &mut db2;
+        let res = run_era_transaction::<_, ResultAndState, _>(&mut env, db, ())
+            .expect("failed executing");
 
         assert!(
             !res.state.is_empty(),

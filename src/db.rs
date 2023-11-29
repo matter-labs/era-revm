@@ -7,7 +7,7 @@
 use std::{
     collections::HashMap,
     fmt::Debug,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, RwLock},
 };
 
 use crate::conversion_utils::{h256_to_b256, h256_to_h160};
@@ -15,7 +15,7 @@ use era_test_node::fork::ForkSource;
 use eyre::ErrReport;
 use revm::{
     primitives::{Bytecode, Bytes},
-    Database,
+    Database, DatabaseCommit,
 };
 use zksync_basic_types::{
     web3::signing::keccak256, AccountTreeId, MiniblockNumber, H160, H256, U256,
@@ -29,9 +29,28 @@ use zksync_types::{
 use zksync_utils::{address_to_h256, h256_to_u256, u256_to_h256};
 
 use crate::conversion_utils::{h160_to_address, revm_u256_to_h256, u256_to_revm_u256};
+
+#[derive(Clone)]
+pub struct CheatableDatabase<DB> {
+    db: RevmDatabaseForEra<DB>
+}
+
+
+#[derive(Default)]
 pub struct RevmDatabaseForEra<DB> {
     pub db: Arc<Mutex<Box<DB>>>,
-    pub current_block: u64,
+    pub factory_deps: Arc<RwLock<HashMap<H256, Vec<u8>>>>,
+    pub current_block: Arc<RwLock<u64>>,
+}
+
+impl<DB> Clone for RevmDatabaseForEra<DB> {
+    fn clone(&self) -> Self {
+        Self {
+            db: self.db.clone(),
+            factory_deps: self.factory_deps.clone(),
+            current_block: self.current_block.clone(),
+        }
+    }
 }
 
 impl<DB> Debug for RevmDatabaseForEra<DB> {
@@ -140,9 +159,16 @@ where
             })
             .flatten()
     }
+
+    pub fn store_factory_dep(&mut self, hash: H256, bytecode: Vec<u8>) {
+        let mut writer = self.factory_deps.write().unwrap();
+        writer.insert(hash, bytecode);
+    }
 }
 
 impl<DB: Database + Send> ForkSource for &RevmDatabaseForEra<DB>
+// impl<DB: Database + Send> ForkSource for RevmDatabaseForEra<DB>
+// impl<DB: Database + Send> ForkSource for RevmDatabaseForEra<DB>
 where
     <DB as revm::Database>::Error: Debug,
 {
@@ -153,10 +179,11 @@ where
         block: Option<BlockIdVariant>,
     ) -> eyre::Result<H256> {
         // We cannot support historical lookups. Only the most recent block is supported.
+        let current_block = self.current_block.read().unwrap().to_owned();
         if let Some(block) = &block {
             match block {
                 BlockIdVariant::BlockNumber(zksync_types::api::BlockNumber::Number(num)) => {
-                    let current_block_number_l2 = self.current_block * 2;
+                    let current_block_number_l2 = current_block * 2;
                     if num.as_u64() != current_block_number_l2 {
                         eyre::bail!("Only fetching of the most recent L2 block {} is supported - but queried for {}", current_block_number_l2, num)
                     }
@@ -288,8 +315,9 @@ mod tests {
             h256_to_u256(bytecode_hash)   => bytecode.clone(),
         };
         let db = RevmDatabaseForEra {
-            current_block: 0,
+            current_block: Arc::new(RwLock::new(0)),
             db: Arc::new(Mutex::new(Box::new(MockDatabase::default()))),
+            factory_deps: Default::default(),
         };
 
         let actual = db.fetch_account_code(account, &modified_keys, &bytecodes);
@@ -317,8 +345,9 @@ mod tests {
             h256_to_u256(bytecode_hash)   => bytecode.clone(),
         };
         let db = RevmDatabaseForEra {
-            current_block: 0,
+            current_block: Arc::new(RwLock::new(0)),
             db: Arc::new(Mutex::new(Box::new(MockDatabase::default()))),
+            factory_deps: Default::default(),
         };
 
         let actual = db.fetch_account_code(account, &modified_keys, &bytecodes);
@@ -345,7 +374,7 @@ mod tests {
         let modified_keys = Default::default();
         let bytecodes = Default::default();
         let db = RevmDatabaseForEra {
-            current_block: 0,
+            current_block: Arc::new(RwLock::new(0)),
             db: Arc::new(Mutex::new(Box::new(MockDatabase {
                 basic: hashmap! {
                     h160_to_address(account) => AccountInfo {
@@ -361,6 +390,7 @@ mod tests {
                     }
                 },
             }))),
+            factory_deps: Default::default(),
         };
 
         let actual = db.fetch_account_code(account, &modified_keys, &bytecodes);
@@ -392,7 +422,7 @@ mod tests {
         };
         let bytecodes = Default::default(); // nothing in bytecodes
         let db = RevmDatabaseForEra {
-            current_block: 0,
+            current_block: Arc::new(RwLock::new(0)),
             db: Arc::new(Mutex::new(Box::new(MockDatabase {
                 basic: hashmap! {
                     h160_to_address(account) => AccountInfo {
@@ -408,6 +438,7 @@ mod tests {
                     }
                 },
             }))),
+            factory_deps: Default::default(),
         };
 
         let actual = db.fetch_account_code(account, &modified_keys, &bytecodes);
@@ -431,8 +462,9 @@ mod tests {
         // See https://github.com/matter-labs/era-test-node/pull/111/files#diff-af08c3181737aa5783b96dfd920cd5ef70829f46cd1b697bdb42414c97310e13R1333
 
         let db = &RevmDatabaseForEra {
-            current_block: 1,
+            current_block: Arc::new(RwLock::new(1)),
             db: Arc::new(Mutex::new(Box::new(MockDatabase::default()))),
+            factory_deps: Default::default(),
         };
 
         let actual = db
@@ -457,8 +489,9 @@ mod tests {
         // See https://github.com/matter-labs/era-test-node/pull/111/files#diff-af08c3181737aa5783b96dfd920cd5ef70829f46cd1b697bdb42414c97310e13R1333
 
         let db = &RevmDatabaseForEra {
-            current_block: 1,
+            current_block: Arc::new(RwLock::new(1)),
             db: Arc::new(Mutex::new(Box::new(MockDatabase::default()))),
+            factory_deps: Default::default(),
         };
 
         db.get_storage_at(

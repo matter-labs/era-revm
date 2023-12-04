@@ -434,7 +434,7 @@ mod tests {
         // See https://github.com/matter-labs/era-test-node/pull/111/files#diff-af08c3181737aa5783b96dfd920cd5ef70829f46cd1b697bdb42414c97310e13R1333
 
         let db = &RevmDatabaseForEra {
-            current_block: Arc::new(RwLock::new(1)),
+            current_block: 1,
             db: Arc::new(Mutex::new(Box::new(MockDatabase::default()))),
         };
 
@@ -460,7 +460,7 @@ mod tests {
         // See https://github.com/matter-labs/era-test-node/pull/111/files#diff-af08c3181737aa5783b96dfd920cd5ef70829f46cd1b697bdb42414c97310e13R1333
 
         let db = &RevmDatabaseForEra {
-            current_block: Arc::new(RwLock::new(1)),
+            current_block: 1,
             db: Arc::new(Mutex::new(Box::new(MockDatabase::default()))),
         };
 

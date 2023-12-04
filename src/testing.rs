@@ -27,12 +27,3 @@ impl revm::Database for MockDatabase {
         todo!()
     }
 }
-
-impl revm::DatabaseCommit for MockDatabase {
-    fn commit(
-        &mut self,
-        changes: hashbrown::HashMap<revm::primitives::Address, revm::primitives::Account>,
-    ) {
-        todo!()
-    }
-}

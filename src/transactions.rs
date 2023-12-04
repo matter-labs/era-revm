@@ -11,7 +11,7 @@ use revm::{
         Account, AccountInfo, Address, Bytes, EVMResult, Env, Eval, Halt, HashMap as rHashMap,
         OutOfGasError, ResultAndState, StorageSlot, TxEnv, B256, KECCAK_EMPTY, U256 as rU256,
     },
-    Database, DatabaseCommit,
+    Database,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -133,7 +133,7 @@ pub enum DatabaseError {
 
 pub fn run_era_transaction<DB, E, INSP>(env: &mut Env, db: DB, _inspector: INSP) -> EVMResult<E>
 where
-    DB: Database + DatabaseCommit + Send,
+    DB: Database + Send,
     <DB as revm::Database>::Error: Debug,
 {
     let (num, ts) = (
@@ -169,7 +169,6 @@ where
     };
 
     let (l2_num, l2_ts) = (num * 2, ts * 2);
-    // let era_db = Arc::new(&era_db);
     let fork_details = ForkDetails {
         fork_source: &era_db,
         l1_block: L1BatchNumber(num as u32),
@@ -372,9 +371,7 @@ mod tests {
             max_fee_per_blob_gas: Default::default(),
         };
 
-        let mut db2 = MockDatabase::default();
-        let db = &mut db2;
-        let res = run_era_transaction::<_, ResultAndState, _>(&mut env, db, ())
+        let res = run_era_transaction::<_, ResultAndState, _>(&mut env, &mut MockDatabase::default(), ())
             .expect("failed executing");
 
         assert!(

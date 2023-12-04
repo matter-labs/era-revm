@@ -16,7 +16,7 @@ use revm::{
 use std::{
     collections::{HashMap, HashSet},
     fmt::Debug,
-    sync::{Arc, Mutex, RwLock},
+    sync::{Arc, Mutex},
 };
 use zksync_basic_types::{web3::signing::keccak256, L1BatchNumber, L2ChainId, H160, H256, U256};
 use zksync_state::StorageView;
@@ -142,8 +142,7 @@ where
     );
     let era_db = RevmDatabaseForEra {
         db: Arc::new(Mutex::new(Box::new(db))),
-        current_block: Arc::new(RwLock::new(num)),
-        factory_deps: Default::default(),
+        current_block: num,
     };
 
     let nonces = era_db.get_nonce_for_address(address_to_h160(env.tx.caller));

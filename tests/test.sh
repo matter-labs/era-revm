@@ -71,6 +71,7 @@ if [ ! -d "./foundry-zksync" ]; then
 [patch.'https://github.com/matter-labs/era-revm']
 era_revm = { path = \"../../\" }
 " >>"foundry-zksync/Cargo.toml"
+  rm "foundry-zksync/Cargo.lock"
 fi
 build_zkforge "foundry-zksync"
 

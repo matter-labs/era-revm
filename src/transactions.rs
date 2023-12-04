@@ -1,11 +1,10 @@
 use era_test_node::{
-    fork::{ForkDetails, ForkStorage},
+    fork::ForkDetails,
     node::{
         InMemoryNode, InMemoryNodeConfig, ShowCalls, ShowGasDetails, ShowStorageLogs, ShowVMDetails,
     },
     system_contracts,
 };
-use multivm::vm_refunds_enhancement::TracerPointer;
 use multivm::{interface::VmExecutionResultAndLogs, vm_refunds_enhancement::ToTracerPointer};
 use revm::{
     primitives::{
@@ -20,7 +19,6 @@ use std::{
     sync::{Arc, Mutex},
 };
 use zksync_basic_types::{web3::signing::keccak256, L1BatchNumber, L2ChainId, H160, H256, U256};
-use zksync_state::StorageView;
 use zksync_types::api::Block;
 use zksync_types::{
     fee::Fee, l2::L2Tx, transaction_request::PaymasterParams, PackedEthSignature, StorageKey,

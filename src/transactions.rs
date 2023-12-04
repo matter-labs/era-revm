@@ -5,7 +5,8 @@ use era_test_node::{
     },
     system_contracts,
 };
-use multivm::{vm_latest::VmExecutionResultAndLogs, vm_refunds_enhancement::TracerPointer};
+use multivm::vm_refunds_enhancement::TracerPointer;
+use multivm::{interface::VmExecutionResultAndLogs, vm_refunds_enhancement::ToTracerPointer};
 use revm::{
     primitives::{
         Account, AccountInfo, Address, Bytes, EVMResult, Env, Eval, Halt, HashMap as rHashMap,
@@ -204,7 +205,7 @@ where
             StorageView<ForkStorage<&RevmDatabaseForEra<DB>>>,
             multivm::vm_refunds_enhancement::HistoryDisabled,
         >,
-    > = vec![Box::new(CheatcodeTracer::new())];
+    > = vec![CheatcodeTracer::new().into_tracer_pointer()];
     let era_execution_result = node
         .run_l2_tx_raw(
             l2_tx,

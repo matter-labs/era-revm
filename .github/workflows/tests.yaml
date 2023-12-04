@@ -62,10 +62,7 @@ jobs:
 
   cheatcodes:
     name: cheatcode-test
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
+    runs-on: ubuntu-22.04-github-hosted-16core
     steps:
       - uses: actions/checkout@v3
       

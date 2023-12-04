@@ -5,10 +5,7 @@ use era_test_node::{
     },
     system_contracts,
 };
-use multivm::{
-    interface::VmExecutionResultAndLogs,
-    vm_latest::{HistoryDisabled, VmTracer},
-};
+use multivm::{vm_latest::VmExecutionResultAndLogs, vm_refunds_enhancement::TracerPointer};
 use revm::{
     primitives::{
         Account, AccountInfo, Address, Bytes, EVMResult, Env, Eval, Halt, HashMap as rHashMap,
@@ -134,18 +131,11 @@ pub enum DatabaseError {
     MissingCode(bool),
 }
 
-pub fn run_era_transaction<'a, DB, E, INSP>(
-    env: &mut Env,
-    db: &mut DB,
-    _inspector: INSP,
-) -> EVMResult<E>
+pub fn run_era_transaction<DB, E, INSP>(env: &mut Env, db: DB, _inspector: INSP) -> EVMResult<E>
 where
-    DB: Database + DatabaseCommit + Send + 'a,
+    DB: Database + DatabaseCommit + Send,
     <DB as revm::Database>::Error: Debug,
 {
-    // let db = Box::new(db);
-    // let db = Box::leak(db);
-    // let db_box_drop = unsafe { Box::from_raw(db) };
     let (num, ts) = (
         env.block.number.to::<u64>(),
         env.block.timestamp.to::<u64>(),
@@ -183,7 +173,6 @@ where
     // let era_db = Arc::new(&era_db);
     let fork_details = ForkDetails {
         fork_source: &era_db,
-        // fork_source: era_db.clone(),
         l1_block: L1BatchNumber(num as u32),
         l2_block: Block::default(),
         l2_miniblock: l2_num,
@@ -212,36 +201,17 @@ where
         l2_tx.common_data.signature = PackedEthSignature::default().serialize_packed().into();
     }
 
-    // let inner_era_db = era_db.clone();
-    // let era_execution_result = node
-    // .run_l2_tx_raw(
-    //     l2_tx,
-    //     multivm::interface::TxExecutionMode::VerifyExecute,
-    //     |x| {
-    //         // x.push(Box::new(CheatcodeTracer::new(inner_era_db)));
-    //     },
-    // )
-    // .unwrap();
-
-    // let x  = node.get_inner().read().unwrap().fork_storage.clone();
-    // let cheatcode_tracer = Box::new(CheatcodeTracer::new(&era_db));
-    // let cheatcode_tracer = Box::new(CheatcodeTracer::new(x));
+    let tracers: Vec<
+        TracerPointer<
+            StorageView<ForkStorage<&RevmDatabaseForEra<DB>>>,
+            multivm::vm_refunds_enhancement::HistoryDisabled,
+        >,
+    > = vec![Box::new(CheatcodeTracer::new())];
     let era_execution_result = node
         .run_l2_tx_raw(
             l2_tx,
             multivm::interface::TxExecutionMode::VerifyExecute,
-            |s| {
-                Some(Box::new(CheatcodeTracer::new(s)))
-            }
-            // Some(vec![
-            //     cheatcode_tracer
-            //         as Box<
-            //             dyn VmTracer<
-            //                 StorageView<ForkStorage<RevmDatabaseForEra<_>>>,
-            //                 HistoryDisabled,
-            //             >,
-            //         >,
-            // ]),
+            tracers,
         )
         .unwrap();
 

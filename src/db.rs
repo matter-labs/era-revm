@@ -15,7 +15,7 @@ use era_test_node::fork::ForkSource;
 use eyre::ErrReport;
 use revm::{
     primitives::{Bytecode, Bytes},
-    Database, DatabaseCommit,
+    Database,
 };
 use zksync_basic_types::{
     web3::signing::keccak256, AccountTreeId, MiniblockNumber, H160, H256, U256,
@@ -29,12 +29,6 @@ use zksync_types::{
 use zksync_utils::{address_to_h256, h256_to_u256, u256_to_h256};
 
 use crate::conversion_utils::{h160_to_address, revm_u256_to_h256, u256_to_revm_u256};
-
-#[derive(Clone)]
-pub struct CheatableDatabase<DB> {
-    db: RevmDatabaseForEra<DB>
-}
-
 
 #[derive(Default)]
 pub struct RevmDatabaseForEra<DB> {
@@ -167,8 +161,6 @@ where
 }
 
 impl<DB: Database + Send> ForkSource for &RevmDatabaseForEra<DB>
-// impl<DB: Database + Send> ForkSource for RevmDatabaseForEra<DB>
-// impl<DB: Database + Send> ForkSource for RevmDatabaseForEra<DB>
 where
     <DB as revm::Database>::Error: Debug,
 {

@@ -200,12 +200,11 @@ where
         l2_tx.common_data.signature = PackedEthSignature::default().serialize_packed().into();
     }
 
-    let tracers = vec![CheatcodeTracer::new().into_tracer_pointer()];
     let era_execution_result = node
         .run_l2_tx_raw(
             l2_tx,
             multivm::interface::TxExecutionMode::VerifyExecute,
-            tracers,
+            vec![CheatcodeTracer::new().into_tracer_pointer()],
         )
         .unwrap();
 

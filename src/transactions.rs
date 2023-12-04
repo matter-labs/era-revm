@@ -200,12 +200,7 @@ where
         l2_tx.common_data.signature = PackedEthSignature::default().serialize_packed().into();
     }
 
-    let tracers: Vec<
-        TracerPointer<
-            StorageView<ForkStorage<&RevmDatabaseForEra<DB>>>,
-            multivm::vm_refunds_enhancement::HistoryDisabled,
-        >,
-    > = vec![CheatcodeTracer::new().into_tracer_pointer()];
+    let tracers = vec![CheatcodeTracer::new().into_tracer_pointer()];
     let era_execution_result = node
         .run_l2_tx_raw(
             l2_tx,

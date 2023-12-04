@@ -2,3 +2,4 @@
 /Cargo.lock
 tests
 !tests/src
+!tests/lib

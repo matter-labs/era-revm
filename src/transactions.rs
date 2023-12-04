@@ -371,8 +371,9 @@ mod tests {
             max_fee_per_blob_gas: Default::default(),
         };
 
-        let res = run_era_transaction::<_, ResultAndState, _>(&mut env, &mut MockDatabase::default(), ())
-            .expect("failed executing");
+        let res =
+            run_era_transaction::<_, ResultAndState, _>(&mut env, &mut MockDatabase::default(), ())
+                .expect("failed executing");
 
         assert!(
             !res.state.is_empty(),

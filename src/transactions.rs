@@ -5,7 +5,7 @@ use era_test_node::{
     },
     system_contracts,
 };
-use multivm::interface::VmExecutionResultAndLogs;
+use multivm::{interface::VmExecutionResultAndLogs, vm_refunds_enhancement::ToTracerPointer};
 use revm::{
     primitives::{
         Account, AccountInfo, Address, Bytes, EVMResult, Env, Eval, Halt, HashMap as rHashMap,
@@ -29,6 +29,7 @@ use revm::primitives::U256 as revmU256;
 use zksync_utils::{h256_to_account_address, u256_to_h256};
 
 use crate::{
+    cheatcodes::CheatcodeTracer,
     conversion_utils::{
         address_to_h160, h160_to_address, h256_to_h160, h256_to_revm_u256, revm_u256_to_u256,
     },
@@ -129,13 +130,9 @@ pub enum DatabaseError {
     MissingCode(bool),
 }
 
-pub fn run_era_transaction<'a, DB, E, INSP>(
-    env: &mut Env,
-    db: &mut DB,
-    _inspector: INSP,
-) -> EVMResult<E>
+pub fn run_era_transaction<DB, E, INSP>(env: &mut Env, db: DB, _inspector: INSP) -> EVMResult<E>
 where
-    DB: Database + Send + 'a,
+    DB: Database + Send,
     <DB as revm::Database>::Error: Debug,
 {
     let (num, ts) = (
@@ -202,7 +199,11 @@ where
     }
 
     let era_execution_result = node
-        .run_l2_tx_raw(l2_tx, multivm::interface::TxExecutionMode::VerifyExecute)
+        .run_l2_tx_raw(
+            l2_tx,
+            multivm::interface::TxExecutionMode::VerifyExecute,
+            vec![CheatcodeTracer::new().into_tracer_pointer()],
+        )
         .unwrap();
 
     let (modified_keys, tx_result, _call_traces, _block, bytecodes, _block_ctx) =

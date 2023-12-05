@@ -29,6 +29,8 @@ use zksync_types::{
 use zksync_utils::{address_to_h256, h256_to_u256, u256_to_h256};
 
 use crate::conversion_utils::{h160_to_address, revm_u256_to_h256, u256_to_revm_u256};
+
+#[derive(Default, Clone)]
 pub struct RevmDatabaseForEra<DB> {
     pub db: Arc<Mutex<Box<DB>>>,
     pub current_block: u64,
@@ -153,10 +155,11 @@ where
         block: Option<BlockIdVariant>,
     ) -> eyre::Result<H256> {
         // We cannot support historical lookups. Only the most recent block is supported.
+        let current_block = self.current_block;
         if let Some(block) = &block {
             match block {
                 BlockIdVariant::BlockNumber(zksync_types::api::BlockNumber::Number(num)) => {
-                    let current_block_number_l2 = self.current_block * 2;
+                    let current_block_number_l2 = current_block * 2;
                     if num.as_u64() != current_block_number_l2 {
                         eyre::bail!("Only fetching of the most recent L2 block {} is supported - but queried for {}", current_block_number_l2, num)
                     }

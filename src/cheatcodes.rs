@@ -1,11 +1,16 @@
+use era_test_node::fork::{ForkSource, ForkStorage};
 use era_test_node::utils::bytecode_to_factory_dep;
 use ethers::{abi::AbiDecode, prelude::abigen};
 use multivm::interface::dyn_tracers::vm_1_3_3::DynTracer;
-use multivm::vm_refunds_enhancement::{HistoryMode, SimpleMemory, VmTracer};
+use multivm::interface::tracer::TracerExecutionStatus;
+use multivm::vm_refunds_enhancement::{
+    BootloaderState, HistoryMode, SimpleMemory, VmTracer, ZkSyncVmState,
+};
 use multivm::zk_evm_1_3_3::tracing::{BeforeExecutionData, VmLocalStateData};
+use std::fmt::Debug;
 use zk_evm::zkevm_opcode_defs::{FatPointer, Opcode, CALL_IMPLICIT_CALLDATA_FAT_PTR_REGISTER};
 use zksync_basic_types::{AccountTreeId, H160};
-use zksync_state::{StoragePtr, WriteStorage};
+use zksync_state::{ReadStorage, StoragePtr, StorageView, WriteStorage};
 use zksync_types::{
     block::{pack_block_info, unpack_block_info},
     get_code_key, get_nonce_key,
@@ -19,6 +24,8 @@ const CHEATCODE_ADDRESS: H160 = H160([
     113, 9, 112, 158, 207, 169, 26, 128, 98, 111, 243, 152, 157, 104, 246, 127, 91, 29, 209, 45,
 ]);
 
+type ForkStorageView<S> = StorageView<ForkStorage<S>>;
+
 abigen!(
     CheatcodeContract,
     r#"[
@@ -30,16 +37,23 @@ abigen!(
     ]"#
 );
 
-#[derive(Clone, Debug, Default)]
-pub struct CheatcodeTracer;
+#[derive(Debug, Clone)]
+enum FinishCycleActions {}
 
-impl<S: WriteStorage, H: HistoryMode> DynTracer<S, SimpleMemory<H>> for CheatcodeTracer {
+#[derive(Clone, Debug, Default)]
+pub struct CheatcodeTracer {
+    actions: Vec<FinishCycleActions>,
+}
+
+impl<S: std::fmt::Debug + ForkSource, H: HistoryMode> DynTracer<ForkStorageView<S>, SimpleMemory<H>>
+    for CheatcodeTracer
+{
     fn before_execution(
         &mut self,
         state: VmLocalStateData<'_>,
         data: BeforeExecutionData,
         memory: &SimpleMemory<H>,
-        storage: StoragePtr<S>,
+        storage: StoragePtr<ForkStorageView<S>>,
     ) {
         if let Opcode::NearCall(_call) = data.opcode.variant.opcode {
             let current = state.vm_local_state.callstack.current;
@@ -76,19 +90,30 @@ impl<S: WriteStorage, H: HistoryMode> DynTracer<S, SimpleMemory<H>> for Cheatcod
     }
 }
 
-impl<S: WriteStorage, H: HistoryMode> VmTracer<S, H> for CheatcodeTracer {}
+impl<S: std::fmt::Debug + ForkSource, H: HistoryMode> VmTracer<ForkStorageView<S>, H>
+    for CheatcodeTracer
+{
+    fn finish_cycle(
+        &mut self,
+        _state: &mut ZkSyncVmState<ForkStorageView<S>, H>,
+        _bootloader_state: &mut BootloaderState,
+    ) -> TracerExecutionStatus {
+        while let Some(_action) = self.actions.pop() {}
+        TracerExecutionStatus::Continue
+    }
+}
 
 impl CheatcodeTracer {
     pub fn new() -> Self {
-        CheatcodeTracer {}
+        CheatcodeTracer { actions: vec![] }
     }
 
-    pub fn dispatch_cheatcode<S: WriteStorage, H: HistoryMode>(
+    pub fn dispatch_cheatcode<S: std::fmt::Debug + ForkSource, H: HistoryMode>(
         &mut self,
         _state: VmLocalStateData<'_>,
         _data: BeforeExecutionData,
         _memory: &SimpleMemory<H>,
-        storage: StoragePtr<S>,
+        storage: StoragePtr<ForkStorageView<S>>,
         call: CheatcodeContractCalls,
     ) {
         use CheatcodeContractCalls::*;

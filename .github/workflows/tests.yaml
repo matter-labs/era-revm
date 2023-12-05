@@ -61,6 +61,7 @@ jobs:
         git fetch --all 
         git checkout 9c0572c118ed4bda5b18748fc852b24430d2e694
         git rev-parse HEAD
+        cat smoke-test.sh
         ./smoke-test.sh
 
   cheatcodes:

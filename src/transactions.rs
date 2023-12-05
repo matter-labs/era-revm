@@ -38,14 +38,20 @@ use crate::{
 };
 
 fn contract_address_from_tx_result(execution_result: &VmExecutionResultAndLogs) -> Option<H160> {
-    for query in execution_result.logs.storage_logs.iter().rev() {
-        if query.log_type == StorageLogQueryType::InitialWrite
-            && query.log_query.address == ACCOUNT_CODE_STORAGE_ADDRESS
-        {
-            return Some(h256_to_account_address(&u256_to_h256(query.log_query.key)));
-        }
-    }
-    None
+    execution_result
+        .logs
+        .storage_logs
+        .iter()
+        .rev()
+        .find_map(|query| {
+            if query.log_type == StorageLogQueryType::InitialWrite
+                && query.log_query.address == ACCOUNT_CODE_STORAGE_ADDRESS
+            {
+                Some(h256_to_account_address(&u256_to_h256(query.log_query.key)))
+            } else {
+                None
+            }
+        })
 }
 
 /// Prepares calldata to invoke deployer contract.

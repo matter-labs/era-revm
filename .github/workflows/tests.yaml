@@ -25,13 +25,13 @@ jobs:
       uses: actions-rust-lang/setup-rust-toolchain@v1
       with:
         toolchain: nightly-2023-07-23
-    
+
     - name: Install cargo-nextest
       run: cargo install cargo-nextest
-        
+
     - name: Run tests
       run: cargo nextest run
-  
+
   smoke-test:
     name: smoke-test
     runs-on: ubuntu-22.04-github-hosted-16core
@@ -40,16 +40,16 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4 
+      uses: actions/checkout@v4
       with:
         path: ${{ env.TEST_REPO_DIR }}
         ref: ${{ github.event.pull_request.head.sha }}
-    
+
     - name: Install Rust
       uses: actions-rust-lang/setup-rust-toolchain@v1
       with:
         toolchain: nightly-2023-07-23
-    
+
     - name: Run smoke-test
       env:
         TEST_REPO: ${{ github.event.repository.name }}
@@ -58,7 +58,7 @@ jobs:
       run: |
         git clone https://github.com/matter-labs/zkfoundry-smoke-test
         cd zkfoundry-smoke-test
-        git fetch --all 
+        git fetch --all
         git checkout bf18e30fe928e50066e131878a9583f404aaa0d7
         git rev-parse HEAD
         cat smoke-test.sh
@@ -72,11 +72,11 @@ jobs:
         with:
           submodules: recursive
           ref: ${{ github.event.pull_request.head.sha }}
-      
+
       - name: Install Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: nightly-2023-07-23
 
       - name: Test Cheatcodes
-        run: cd tests &&  ./test.sh
+        run: cd tests && ls -l && ls -l lib && ls -l lib/forge-std &&  ./test.sh

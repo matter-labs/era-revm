@@ -58,7 +58,7 @@ jobs:
       run: |
         git clone https://github.com/matter-labs/zkfoundry-smoke-test
         cd zkfoundry-smoke-test
-        git fetch && git checkout nish-cargo-lock-fix && git pull && git rev-parse HEAD
+        git fetch --all && git checkout nish-cargo-lock-fix && git pull && git rev-parse HEAD
         ./smoke-test.sh
 
   cheatcodes:

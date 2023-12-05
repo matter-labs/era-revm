@@ -31,8 +31,7 @@ abigen!(
 );
 
 #[derive(Clone, Debug, Default)]
-// #[derive(Debug)]
-pub struct CheatcodeTracer {}
+pub struct CheatcodeTracer;
 
 impl<S: WriteStorage, H: HistoryMode> DynTracer<S, SimpleMemory<H>> for CheatcodeTracer {
     fn before_execution(

@@ -36,8 +36,8 @@ abigen!(
         function deal(address who, uint256 newBalance)
         function etch(address who, bytes calldata code)
         function getNonce(address account)
-        function setNonce(address account, uint64 nonce)
         function roll(uint256 blockNumber)
+        function setNonce(address account, uint64 nonce)
         function warp(uint256 timestamp)
     ]"#
 );
@@ -245,6 +245,22 @@ impl CheatcodeTracer {
                 tracing::info!("👷 Returndata is {:?}", account_nonce);
                 self.return_data = Some(vec![account_nonce]);
             }
+            Roll(RollCall { block_number }) => {
+                tracing::info!("👷 Setting block number to {}", block_number);
+
+                let key = StorageKey::new(
+                    AccountTreeId::new(zksync_types::SYSTEM_CONTEXT_ADDRESS),
+                    zksync_types::CURRENT_VIRTUAL_BLOCK_INFO_POSITION,
+                );
+                let mut storage = storage.borrow_mut();
+                let (_, block_timestamp) =
+                    unpack_block_info(h256_to_u256(storage.read_value(&key)));
+                self.write_storage(
+                    key,
+                    u256_to_h256(pack_block_info(block_number.as_u64(), block_timestamp)),
+                    &mut storage,
+                );
+            }
             SetNonce(SetNonceCall { account, nonce }) => {
                 tracing::info!("👷 Setting nonce for {account:?} to {nonce}");
                 let mut storage = storage.borrow_mut();
@@ -278,22 +294,7 @@ impl CheatcodeTracer {
                 );
                 self.write_storage(nonce_key, u256_to_h256(enforced_full_nonce), &mut storage);
             }
-            Roll(RollCall { block_number }) => {
-                tracing::info!("👷 Setting block number to {}", block_number);
 
-                let key = StorageKey::new(
-                    AccountTreeId::new(zksync_types::SYSTEM_CONTEXT_ADDRESS),
-                    zksync_types::CURRENT_VIRTUAL_BLOCK_INFO_POSITION,
-                );
-                let mut storage = storage.borrow_mut();
-                let (_, block_timestamp) =
-                    unpack_block_info(h256_to_u256(storage.read_value(&key)));
-                self.write_storage(
-                    key,
-                    u256_to_h256(pack_block_info(block_number.as_u64(), block_timestamp)),
-                    &mut storage,
-                );
-            }
             Warp(WarpCall { timestamp }) => {
                 tracing::info!("👷 Setting block timestamp {}", timestamp);
 

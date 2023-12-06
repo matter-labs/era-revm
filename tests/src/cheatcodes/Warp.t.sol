@@ -26,5 +26,6 @@ contract CheatcodeWarpTest is Test {
             finalTimestamp == NEW_BLOCK_TIMESTAMP,
             "timestamp was not changed"
         );
+        console.log("failed?", failed());
     }
 }

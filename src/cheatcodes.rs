@@ -36,7 +36,9 @@ abigen!(
         function deal(address who, uint256 newBalance)
         function etch(address who, bytes calldata code)
         function getNonce(address account)
+        function load(address account, bytes32 slot)
         function setNonce(address account, uint64 nonce)
+        function store(address account, bytes32 slot, bytes32 value)
         function roll(uint256 blockNumber)
         function warp(uint256 timestamp)
     ]"#
@@ -245,6 +247,13 @@ impl CheatcodeTracer {
                 tracing::info!("👷 Returndata is {:?}", account_nonce);
                 self.return_data = Some(vec![account_nonce]);
             }
+            Load(LoadCall { account, slot }) => {
+                tracing::info!("Getting storage slot {:?} for account {:?}", slot, account);
+                let key = StorageKey::new(AccountTreeId::new(account), H256(slot));
+                let mut storage = storage.borrow_mut();
+                let value = storage.read_value(&key);
+                self.return_data = Some(vec![h256_to_u256(value)]);
+            }
             SetNonce(SetNonceCall { account, nonce }) => {
                 tracing::info!("👷 Setting nonce for {account:?} to {nonce}");
                 let mut storage = storage.borrow_mut();
@@ -277,6 +286,21 @@ impl CheatcodeTracer {
                     nonce
                 );
                 self.write_storage(nonce_key, u256_to_h256(enforced_full_nonce), &mut storage);
+            }
+            Store(StoreCall {
+                account,
+                slot,
+                value,
+            }) => {
+                tracing::info!(
+                    "👷 Setting storage slot {:?} for account {:?} to {:?}",
+                    slot,
+                    account,
+                    value
+                );
+                let mut storage = storage.borrow_mut();
+                let key = StorageKey::new(AccountTreeId::new(account), H256(slot));
+                self.write_storage(key, H256(value), &mut storage);
             }
             Roll(RollCall { block_number }) => {
                 tracing::info!("👷 Setting block number to {}", block_number);

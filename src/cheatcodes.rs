@@ -1,5 +1,6 @@
 use era_test_node::fork::{ForkSource, ForkStorage};
 use era_test_node::utils::bytecode_to_factory_dep;
+use ethers::utils::to_checksum;
 use ethers::{abi::AbiDecode, prelude::abigen};
 use itertools::Itertools;
 use multivm::interface::dyn_tracers::vm_1_3_3::DynTracer;
@@ -12,7 +13,7 @@ use multivm::zk_evm_1_3_3::tracing::{BeforeExecutionData, VmLocalStateData};
 use multivm::zk_evm_1_3_3::vm_state::PrimitiveValue;
 use std::fmt::Debug;
 use zk_evm::zkevm_opcode_defs::{FatPointer, Opcode, CALL_IMPLICIT_CALLDATA_FAT_PTR_REGISTER};
-use zksync_basic_types::{AccountTreeId, H160, H256, U256};
+use zksync_basic_types::{AccountTreeId, Address, H160, H256, U256};
 use zksync_state::{ReadStorage, StoragePtr, StorageView};
 use zksync_types::{
     block::{pack_block_info, unpack_block_info},
@@ -67,6 +68,12 @@ abigen!(
         function startPrank(address sender)
         function startPrank(address sender, address origin)
         function stopPrank()
+        function toString(address value)
+        function toString(bool value)
+        function toString(uint256 value)
+        function toString(int256 value)
+        function toString(bytes32 value)
+        function toString(bytes value)
         function warp(uint256 timestamp)
     ]"#
 );
@@ -415,7 +422,37 @@ impl CheatcodeTracer {
                 let key = StorageKey::new(AccountTreeId::new(account), H256(slot));
                 self.write_storage(key, H256(value), &mut storage);
             }
-
+            ToString0(ToString0Call { value }) => {
+                tracing::info!("Converting address into string");
+                let address = Address::from(value);
+                let address_with_checksum = to_checksum(&address, None);
+                self.add_trimmed_return_data(address_with_checksum.as_bytes());
+            }
+            ToString1(ToString1Call { value }) => {
+                tracing::info!("Converting bool into string");
+                let bool_value = value.to_string();
+                self.add_trimmed_return_data(bool_value.as_bytes());
+            }
+            ToString2(ToString2Call { value }) => {
+                tracing::info!("Converting uint256 into string");
+                let uint_value = value.to_string();
+                self.add_trimmed_return_data(uint_value.as_bytes());
+            }
+            ToString3(ToString3Call { value }) => {
+                tracing::info!("Converting int256 into string");
+                let int_value = value.to_string();
+                self.add_trimmed_return_data(int_value.as_bytes());
+            }
+            ToString4(ToString4Call { value }) => {
+                tracing::info!("Converting bytes32 into string");
+                let bytes_value = format!("0x{}", hex::encode(value));
+                self.add_trimmed_return_data(bytes_value.as_bytes());
+            }
+            ToString5(ToString5Call { value }) => {
+                tracing::info!("Converting bytes into string");
+                let bytes_value = format!("0x{}", hex::encode(value));
+                self.add_trimmed_return_data(bytes_value.as_bytes());
+            }
             Warp(WarpCall { timestamp }) => {
                 tracing::info!("👷 Setting block timestamp {}", timestamp);
 
@@ -451,5 +488,24 @@ impl CheatcodeTracer {
                 read_value: storage.read_value(&key),
                 write_value,
             });
+    }
+
+    fn add_trimmed_return_data(&mut self, data: &[u8]) {
+        let data_length = data.len();
+        let mut data: Vec<U256> = data
+            .chunks(32)
+            .map(|b| {
+                // Copies the bytes into a 32 byte array
+                // padding with zeros to the right if necessary
+                let mut bytes = [0u8; 32];
+                bytes[..b.len()].copy_from_slice(b);
+                bytes.into()
+            })
+            .collect_vec();
+
+        // Add the length of the data to the end of the return data
+        data.push(data_length.into());
+
+        self.return_data = Some(data);
     }
 }

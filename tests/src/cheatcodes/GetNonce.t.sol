@@ -18,5 +18,17 @@ contract CheatcodeSetNonceTest is Test {
         );
         require(success, "setNonce failed");
         console.log("failed?", failed());
+
+        //test getNonce
+        (bool success2, bytes memory data2) = Constants.CHEATCODE_ADDRESS.call(
+            abi.encodeWithSignature("getNonce(address)", TEST_ADDRESS)
+        );
+        require(success2, "getNonce failed");
+        uint256 nonce = abi.decode(data2, (uint256));
+        console.log("nonce: 0x", nonce);
+        require(nonce == NEW_NONCE, "nonce was not changed");
+        console.log("failed?", failed());
     }
 }
+
+

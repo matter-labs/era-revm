@@ -59,8 +59,10 @@ abigen!(
         function deal(address who, uint256 newBalance)
         function etch(address who, bytes calldata code)
         function getNonce(address account)
+        function load(address account, bytes32 slot)
         function roll(uint256 blockNumber)
         function setNonce(address account, uint64 nonce)
+        function store(address account, bytes32 slot, bytes32 value)
         function startPrank(address sender)
         function startPrank(address sender, address origin)
         function stopPrank()
@@ -292,6 +294,13 @@ impl CheatcodeTracer {
                 tracing::info!("👷 Returndata is {:?}", account_nonce);
                 self.return_data = Some(vec![account_nonce]);
             }
+            Load(LoadCall { account, slot }) => {
+                tracing::info!("Getting storage slot {:?} for account {:?}", slot, account);
+                let key = StorageKey::new(AccountTreeId::new(account), H256(slot));
+                let mut storage = storage.borrow_mut();
+                let value = storage.read_value(&key);
+                self.return_data = Some(vec![h256_to_u256(value)]);
+            }
             Roll(RollCall { block_number }) => {
                 tracing::info!("👷 Setting block number to {}", block_number);
 
@@ -350,7 +359,6 @@ impl CheatcodeTracer {
             }
             StartPrankWithOrigin(StartPrankWithOriginCall { sender, origin }) => {
                 tracing::info!("👷 Starting prank to {sender:?} with origin {origin:?}");
-
                 let key = StorageKey::new(
                     AccountTreeId::new(zksync_types::SYSTEM_CONTEXT_ADDRESS),
                     zksync_types::SYSTEM_CONTEXT_TX_ORIGIN_POSITION,
@@ -381,6 +389,22 @@ impl CheatcodeTracer {
 
                 self.permanent_actions.start_prank = None;
             }
+            Store(StoreCall {
+                account,
+                slot,
+                value,
+            }) => {
+                tracing::info!(
+                    "👷 Setting storage slot {:?} for account {:?} to {:?}",
+                    slot,
+                    account,
+                    value
+                );
+                let mut storage = storage.borrow_mut();
+                let key = StorageKey::new(AccountTreeId::new(account), H256(slot));
+                self.write_storage(key, H256(value), &mut storage);
+            }
+
             Warp(WarpCall { timestamp }) => {
                 tracing::info!("👷 Setting block timestamp {}", timestamp);
 

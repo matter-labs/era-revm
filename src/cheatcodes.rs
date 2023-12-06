@@ -1,12 +1,15 @@
 use era_test_node::fork::{ForkSource, ForkStorage};
 use era_test_node::utils::bytecode_to_factory_dep;
 use ethers::{abi::AbiDecode, prelude::abigen};
+use itertools::Itertools;
 use multivm::interface::dyn_tracers::vm_1_3_3::DynTracer;
 use multivm::interface::tracer::TracerExecutionStatus;
 use multivm::vm_refunds_enhancement::{
     BootloaderState, HistoryMode, SimpleMemory, VmTracer, ZkSyncVmState,
 };
+use multivm::zk_evm_1_3_1::zkevm_opcode_defs::RET_IMPLICIT_RETURNDATA_PARAMS_REGISTER;
 use multivm::zk_evm_1_3_3::tracing::{BeforeExecutionData, VmLocalStateData};
+use multivm::zk_evm_1_3_3::vm_state::PrimitiveValue;
 use std::fmt::Debug;
 use zk_evm::zkevm_opcode_defs::{FatPointer, Opcode, CALL_IMPLICIT_CALLDATA_FAT_PTR_REGISTER};
 use zksync_basic_types::{AccountTreeId, H160, H256, U256};
@@ -32,6 +35,7 @@ abigen!(
     r#"[
         function deal(address who, uint256 newBalance)
         function etch(address who, bytes calldata code)
+        function getNonce(address account)
         function setNonce(address account, uint64 nonce)
         function roll(uint256 blockNumber)
         function warp(uint256 timestamp)
@@ -54,6 +58,9 @@ enum FinishCycleActions {
 #[derive(Clone, Debug, Default)]
 pub struct CheatcodeTracer {
     actions: Vec<FinishCycleActions>,
+    return_data: Option<Vec<U256>>,
+    return_ptr: Option<FatPointer>,
+    near_calls: usize,
 }
 
 impl<S: std::fmt::Debug + ForkSource, H: HistoryMode> DynTracer<ForkStorageView<S>, SimpleMemory<H>>
@@ -99,6 +106,33 @@ impl<S: std::fmt::Debug + ForkSource, H: HistoryMode> DynTracer<ForkStorageView<
             }
         }
     }
+
+    fn after_execution(
+        &mut self,
+        state: VmLocalStateData<'_>,
+        data: multivm::zk_evm_1_3_3::tracing::AfterExecutionData,
+        _memory: &SimpleMemory<H>,
+        _storage: StoragePtr<ForkStorageView<S>>,
+    ) {
+        if self.return_data.is_some() {
+            if let Opcode::Ret(_call) = data.opcode.variant.opcode {
+                if self.near_calls == 0 {
+                    let ptr = state.vm_local_state.registers
+                        [RET_IMPLICIT_RETURNDATA_PARAMS_REGISTER as usize];
+                    let fat_data_pointer = FatPointer::from_u256(ptr.value);
+                    self.return_ptr = Some(fat_data_pointer);
+                } else {
+                    self.near_calls = self.near_calls.saturating_sub(1);
+                }
+            }
+        }
+
+        if let Opcode::NearCall(_call) = data.opcode.variant.opcode {
+            if self.return_data.is_some() {
+                self.near_calls += 1;
+            }
+        }
+    }
 }
 
 impl<S: std::fmt::Debug + ForkSource, H: HistoryMode> VmTracer<ForkStorageView<S>, H>
@@ -138,13 +172,37 @@ impl<S: std::fmt::Debug + ForkSource, H: HistoryMode> VmTracer<ForkStorageView<S
                 }
             }
         }
+
+        // Set return data, if any
+        if let Some(mut fat_pointer) = self.return_ptr.take() {
+            let timestamp = Timestamp(state.local_state.timestamp);
+
+            let elements = self.return_data.take().unwrap();
+            fat_pointer.length = (elements.len() as u32) * 32;
+            state.local_state.registers[RET_IMPLICIT_RETURNDATA_PARAMS_REGISTER as usize] =
+                PrimitiveValue {
+                    value: fat_pointer.to_u256(),
+                    is_pointer: true,
+                };
+            state.memory.populate_page(
+                fat_pointer.memory_page as usize,
+                elements.into_iter().enumerate().collect_vec(),
+                timestamp,
+            );
+        }
+
         TracerExecutionStatus::Continue
     }
 }
 
 impl CheatcodeTracer {
     pub fn new() -> Self {
-        CheatcodeTracer { actions: vec![] }
+        CheatcodeTracer {
+            actions: vec![],
+            near_calls: 0,
+            return_data: None,
+            return_ptr: None,
+        }
     }
 
     pub fn dispatch_cheatcode<S: std::fmt::Debug + ForkSource, H: HistoryMode>(
@@ -171,6 +229,21 @@ impl CheatcodeTracer {
                 let (hash, code) = bytecode_to_factory_dep(code.0.into());
                 self.store_factory_dep(hash, code);
                 self.write_storage(code_key, u256_to_h256(hash), &mut storage.borrow_mut());
+            }
+            GetNonce(GetNonceCall { account }) => {
+                tracing::info!("👷 Getting nonce for {account:?}");
+                let mut storage = storage.borrow_mut();
+                let nonce_key = get_nonce_key(&account);
+                let full_nonce = storage.read_value(&nonce_key);
+                let (account_nonce, _) = decompose_full_nonce(h256_to_u256(full_nonce));
+                tracing::info!(
+                    "👷 Nonces for account {:?} are {}",
+                    account,
+                    account_nonce.as_u64()
+                );
+                tracing::info!("👷 Setting returndata",);
+                tracing::info!("👷 Returndata is {:?}", account_nonce);
+                self.return_data = Some(vec![account_nonce]);
             }
             SetNonce(SetNonceCall { account, nonce }) => {
                 tracing::info!("👷 Setting nonce for {account:?} to {nonce}");

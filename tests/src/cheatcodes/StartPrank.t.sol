@@ -7,7 +7,6 @@ import {Constants} from "./Constants.sol";
 contract CheatcodeStartPrankTest is Test {
     address constant TEST_ADDRESS = 0x6Eb28604685b1F182dAB800A1Bfa4BaFdBA8a79a;
     address constant TEST_ORIGIN = 0xdEBe90b7BFD87Af696B1966082F6515a6E72F3d8;
-    uint256 constant NEW_BLOCK_NUMBER = 10;
 
     function testStartPrank() public {
         address original_msg_sender = msg.sender;

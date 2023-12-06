@@ -33,6 +33,7 @@ type ForkStorageView<S> = StorageView<ForkStorage<S>>;
 abigen!(
     CheatcodeContract,
     r#"[
+        function addr(uint256 privateKey)
         function deal(address who, uint256 newBalance)
         function etch(address who, bytes calldata code)
         function getNonce(address account)
@@ -217,6 +218,16 @@ impl CheatcodeTracer {
     ) {
         use CheatcodeContractCalls::*;
         match call {
+            Addr(AddrCall { private_key }) => {
+                tracing::info!("Getting address for private key");
+                let Ok(address) = zksync_types::PackedEthSignature::address_from_private_key(
+                    &u256_to_h256(private_key),
+                ) else {
+                    tracing::error!("Failed generating address for private key");
+                    return;
+                };
+                self.return_data = Some(vec![h256_to_u256(address.into())]);
+            }
             Deal(DealCall { who, new_balance }) => {
                 tracing::info!("👷 Setting balance for {who:?} to {new_balance}");
                 self.write_storage(

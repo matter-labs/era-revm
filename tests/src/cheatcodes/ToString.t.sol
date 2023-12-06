@@ -46,10 +46,9 @@ contract CheatcodeToStringTest is Test {
         console.log("failed?", failed());
     }
 
-    function testToStringFromUint256(
-        uint256 value,
-        string memory stringValue
-    ) external {
+    function testToStringFromUint256() external {
+        uint256 value = 99;
+        string memory stringValue = "99";
         (bool success, bytes memory rawData) = Constants.CHEATCODE_ADDRESS.call(
             abi.encodeWithSignature("toString(uint256)", value)
         );
@@ -63,10 +62,9 @@ contract CheatcodeToStringTest is Test {
         console.log("failed?", failed());
     }
 
-    function testToStringFromInt256(
-        int256 value,
-        string memory stringValue
-    ) external {
+    function testToStringFromInt256() external {
+        int256 value = -99;
+        string memory stringValue = "-99";
         (bool success, bytes memory rawData) = Constants.CHEATCODE_ADDRESS.call(
             abi.encodeWithSignature("toString(int256)", value)
         );

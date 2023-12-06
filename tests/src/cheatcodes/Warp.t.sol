@@ -7,7 +7,7 @@ import {Constants} from "./Constants.sol";
 contract CheatcodeWarpTest is Test {
     uint256 constant NEW_BLOCK_TIMESTAMP = uint256(10000);
 
-    function test_warp() public {
+    function testWarp() public {
         uint256 initialTimestamp = block.timestamp;
         console.log("timestamp before:", initialTimestamp);
         require(

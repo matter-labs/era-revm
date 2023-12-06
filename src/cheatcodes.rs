@@ -28,6 +28,29 @@ const CHEATCODE_ADDRESS: H160 = H160([
     113, 9, 112, 158, 207, 169, 26, 128, 98, 111, 243, 152, 157, 104, 246, 127, 91, 29, 209, 45,
 ]);
 
+const INTERNAL_CONTRACT_ADDRESSES: [H160; 20] = [
+    zksync_types::BOOTLOADER_ADDRESS,
+    zksync_types::ACCOUNT_CODE_STORAGE_ADDRESS,
+    zksync_types::NONCE_HOLDER_ADDRESS,
+    zksync_types::KNOWN_CODES_STORAGE_ADDRESS,
+    zksync_types::IMMUTABLE_SIMULATOR_STORAGE_ADDRESS,
+    zksync_types::CONTRACT_DEPLOYER_ADDRESS,
+    zksync_types::CONTRACT_FORCE_DEPLOYER_ADDRESS,
+    zksync_types::L1_MESSENGER_ADDRESS,
+    zksync_types::MSG_VALUE_SIMULATOR_ADDRESS,
+    zksync_types::KECCAK256_PRECOMPILE_ADDRESS,
+    zksync_types::L2_ETH_TOKEN_ADDRESS,
+    zksync_types::SYSTEM_CONTEXT_ADDRESS,
+    zksync_types::BOOTLOADER_UTILITIES_ADDRESS,
+    zksync_types::EVENT_WRITER_ADDRESS,
+    zksync_types::COMPRESSOR_ADDRESS,
+    zksync_types::COMPLEX_UPGRADER_ADDRESS,
+    zksync_types::ECRECOVER_PRECOMPILE_ADDRESS,
+    zksync_types::SHA256_PRECOMPILE_ADDRESS,
+    zksync_types::MINT_AND_BURN_ADDRESS,
+    H160::zero(),
+];
+
 type ForkStorageView<S> = StorageView<ForkStorage<S>>;
 
 abigen!(
@@ -38,12 +61,24 @@ abigen!(
         function getNonce(address account)
         function roll(uint256 blockNumber)
         function setNonce(address account, uint64 nonce)
+        function startPrank(address sender)
+        function startPrank(address sender, address origin)
+        function stopPrank()
         function warp(uint256 timestamp)
     ]"#
 );
 
+#[derive(Debug, Default, Clone)]
+pub struct CheatcodeTracer {
+    one_time_actions: Vec<FinishCycleOneTimeActions>,
+    permanent_actions: FinishCyclePermanentActions,
+    return_data: Option<Vec<U256>>,
+    return_ptr: Option<FatPointer>,
+    near_calls: usize,
+}
+
 #[derive(Debug, Clone)]
-enum FinishCycleActions {
+enum FinishCycleOneTimeActions {
     StorageWrite {
         key: StorageKey,
         read_value: H256,
@@ -55,12 +90,15 @@ enum FinishCycleActions {
     },
 }
 
-#[derive(Clone, Debug, Default)]
-pub struct CheatcodeTracer {
-    actions: Vec<FinishCycleActions>,
-    return_data: Option<Vec<U256>>,
-    return_ptr: Option<FatPointer>,
-    near_calls: usize,
+#[derive(Debug, Default, Clone)]
+struct FinishCyclePermanentActions {
+    start_prank: Option<StartPrankOpts>,
+}
+
+#[derive(Debug, Clone)]
+struct StartPrankOpts {
+    sender: H160,
+    origin: Option<H256>,
 }
 
 impl<S: std::fmt::Debug + ForkSource, H: HistoryMode> DynTracer<ForkStorageView<S>, SimpleMemory<H>>
@@ -143,9 +181,9 @@ impl<S: std::fmt::Debug + ForkSource, H: HistoryMode> VmTracer<ForkStorageView<S
         state: &mut ZkSyncVmState<ForkStorageView<S>, H>,
         _bootloader_state: &mut BootloaderState,
     ) -> TracerExecutionStatus {
-        while let Some(action) = self.actions.pop() {
+        while let Some(action) = self.one_time_actions.pop() {
             match action {
-                FinishCycleActions::StorageWrite {
+                FinishCycleOneTimeActions::StorageWrite {
                     key,
                     read_value,
                     write_value,
@@ -164,7 +202,7 @@ impl<S: std::fmt::Debug + ForkSource, H: HistoryMode> VmTracer<ForkStorageView<S
                         is_service: false,
                     });
                 }
-                FinishCycleActions::StoreFactoryDep { hash, bytecode } => {
+                FinishCycleOneTimeActions::StoreFactoryDep { hash, bytecode } => {
                     state.decommittment_processor.populate(
                         vec![(hash, bytecode)],
                         Timestamp(state.local_state.timestamp),
@@ -191,6 +229,14 @@ impl<S: std::fmt::Debug + ForkSource, H: HistoryMode> VmTracer<ForkStorageView<S
             );
         }
 
+        // Sets the sender address for startPrank cheatcode
+        if let Some(start_prank_call) = &self.permanent_actions.start_prank {
+            let this_address = state.local_state.callstack.current.this_address;
+            if !INTERNAL_CONTRACT_ADDRESSES.contains(&this_address) {
+                state.local_state.callstack.current.msg_sender = start_prank_call.sender;
+            }
+        }
+
         TracerExecutionStatus::Continue
     }
 }
@@ -198,7 +244,8 @@ impl<S: std::fmt::Debug + ForkSource, H: HistoryMode> VmTracer<ForkStorageView<S
 impl CheatcodeTracer {
     pub fn new() -> Self {
         CheatcodeTracer {
-            actions: vec![],
+            one_time_actions: vec![],
+            permanent_actions: FinishCyclePermanentActions { start_prank: None },
             near_calls: 0,
             return_data: None,
             return_ptr: None,
@@ -294,7 +341,46 @@ impl CheatcodeTracer {
                 );
                 self.write_storage(nonce_key, u256_to_h256(enforced_full_nonce), &mut storage);
             }
+            StartPrank(StartPrankCall { sender }) => {
+                tracing::info!("👷 Starting prank to {sender:?}");
+                self.permanent_actions.start_prank = Some(StartPrankOpts {
+                    sender,
+                    origin: None,
+                });
+            }
+            StartPrankWithOrigin(StartPrankWithOriginCall { sender, origin }) => {
+                tracing::info!("👷 Starting prank to {sender:?} with origin {origin:?}");
 
+                let key = StorageKey::new(
+                    AccountTreeId::new(zksync_types::SYSTEM_CONTEXT_ADDRESS),
+                    zksync_types::SYSTEM_CONTEXT_TX_ORIGIN_POSITION,
+                );
+                let original_tx_origin = storage.borrow_mut().read_value(&key);
+                self.write_storage(key, origin.into(), &mut storage.borrow_mut());
+
+                self.permanent_actions.start_prank = Some(StartPrankOpts {
+                    sender,
+                    origin: Some(original_tx_origin),
+                });
+            }
+            StopPrank(StopPrankCall) => {
+                tracing::info!("👷 Stopping prank");
+
+                if let Some(origin) = self
+                    .permanent_actions
+                    .start_prank
+                    .as_ref()
+                    .and_then(|v| v.origin)
+                {
+                    let key = StorageKey::new(
+                        AccountTreeId::new(zksync_types::SYSTEM_CONTEXT_ADDRESS),
+                        zksync_types::SYSTEM_CONTEXT_TX_ORIGIN_POSITION,
+                    );
+                    self.write_storage(key, origin, &mut storage.borrow_mut());
+                }
+
+                self.permanent_actions.start_prank = None;
+            }
             Warp(WarpCall { timestamp }) => {
                 tracing::info!("👷 Setting block timestamp {}", timestamp);
 
@@ -314,8 +400,8 @@ impl CheatcodeTracer {
     }
 
     fn store_factory_dep(&mut self, hash: U256, bytecode: Vec<U256>) {
-        self.actions
-            .push(FinishCycleActions::StoreFactoryDep { hash, bytecode });
+        self.one_time_actions
+            .push(FinishCycleOneTimeActions::StoreFactoryDep { hash, bytecode });
     }
 
     fn write_storage<S: std::fmt::Debug + ForkSource>(
@@ -324,10 +410,11 @@ impl CheatcodeTracer {
         write_value: H256,
         storage: &mut StorageView<ForkStorage<S>>,
     ) {
-        self.actions.push(FinishCycleActions::StorageWrite {
-            key,
-            read_value: storage.read_value(&key),
-            write_value,
-        });
+        self.one_time_actions
+            .push(FinishCycleOneTimeActions::StorageWrite {
+                key,
+                read_value: storage.read_value(&key),
+                write_value,
+            });
     }
 }

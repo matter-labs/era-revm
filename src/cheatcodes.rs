@@ -1,6 +1,5 @@
 use era_test_node::utils::bytecode_to_factory_dep;
 use ethers::{abi::AbiDecode, prelude::abigen};
-// use multivm::interface::dyn_tracers::vm_1_3_3::DynTracer;
 use multivm::interface::dyn_tracers::vm_1_4_0::DynTracer;
 use multivm::vm_latest::{HistoryMode, SimpleMemory, VmTracer};
 use multivm::zk_evm_1_4_0::tracing::{BeforeExecutionData, VmLocalStateData};

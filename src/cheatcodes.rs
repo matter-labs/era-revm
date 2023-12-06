@@ -1,8 +1,9 @@
 use era_test_node::utils::bytecode_to_factory_dep;
 use ethers::{abi::AbiDecode, prelude::abigen};
-use multivm::interface::dyn_tracers::vm_1_3_3::DynTracer;
-use multivm::vm_refunds_enhancement::{HistoryMode, SimpleMemory, VmTracer};
-use multivm::zk_evm_1_3_3::tracing::{BeforeExecutionData, VmLocalStateData};
+// use multivm::interface::dyn_tracers::vm_1_3_3::DynTracer;
+use multivm::interface::dyn_tracers::vm_1_4_0::DynTracer;
+use multivm::vm_latest::{HistoryMode, SimpleMemory, VmTracer};
+use multivm::zk_evm_1_4_0::tracing::{BeforeExecutionData, VmLocalStateData};
 use zk_evm::zkevm_opcode_defs::{FatPointer, Opcode, CALL_IMPLICIT_CALLDATA_FAT_PTR_REGISTER};
 use zksync_basic_types::{AccountTreeId, H160};
 use zksync_state::{StoragePtr, WriteStorage};

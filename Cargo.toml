@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 revm = { version = "3.5.0" }
-era_test_node = { git = "https://github.com/matter-labs/era-test-node.git", rev = "64835d25a6e4b1540a091ff0d805b01227213969" }
+era_test_node = { git = "https://github.com/matter-labs/era-test-node.git", rev = "9e7c5cbbef3366b9f573d480ce3646d8fd4ce5d4" }
 zksync_basic_types = { git = "https://github.com/matter-labs/zksync-era.git", rev = "bd268ac02bc3530c1d3247cb9496c3e13c2e52d9" }
 zksync_types = { git = "https://github.com/matter-labs/zksync-era.git", rev = "bd268ac02bc3530c1d3247cb9496c3e13c2e52d9" }
 zksync_state = { git = "https://github.com/matter-labs/zksync-era.git", rev = "bd268ac02bc3530c1d3247cb9496c3e13c2e52d9" }

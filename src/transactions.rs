@@ -5,7 +5,7 @@ use era_test_node::{
     },
     system_contracts,
 };
-use multivm::{interface::VmExecutionResultAndLogs, vm_refunds_enhancement::ToTracerPointer};
+use multivm::{interface::VmExecutionResultAndLogs, vm_latest::ToTracerPointer};
 use revm::{
     primitives::{
         Account, AccountInfo, Address, Bytes, EVMResult, Env, Eval, Halt, HashMap as rHashMap,

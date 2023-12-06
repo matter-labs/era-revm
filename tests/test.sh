@@ -75,9 +75,6 @@ era_revm = { path = \"../../\" }
 fi
 build_zkforge "foundry-zksync"
 
-echo "Building...."
-RUST_LOG=debug "${BINARY_PATH}" zkbuild --use "./${SOLC}"
-
 echo "Running tests..."
 # [1] Check test suite passed
 RUST_LOG=debug "${BINARY_PATH}" test --use "./${SOLC}"

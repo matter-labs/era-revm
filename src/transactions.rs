@@ -335,7 +335,7 @@ where
 }
 
 fn decode_l2_tx_result(output: Vec<u8>) -> Vec<u8> {
-    ethabi::decode(&vec![ParamType::Bytes], &output)
+    ethabi::decode(&[ParamType::Bytes], &output)
         .ok()
         .and_then(|result| result.first().cloned())
         .and_then(|result| result.into_bytes())

@@ -279,7 +279,7 @@ impl CheatcodeTracer {
         use CheatcodeContractCalls::*;
         match call {
             Addr(AddrCall { private_key }) => {
-                tracing::info!("Getting address for private key");
+                tracing::info!("👷 Getting address for private key");
                 let Ok(address) = zksync_types::PackedEthSignature::address_from_private_key(
                     &u256_to_h256(private_key),
                 ) else {
@@ -319,7 +319,7 @@ impl CheatcodeTracer {
                 self.return_data = Some(vec![account_nonce]);
             }
             Load(LoadCall { account, slot }) => {
-                tracing::info!("Getting storage slot {:?} for account {:?}", slot, account);
+                tracing::info!("👷 Getting storage slot {:?} for account {:?}", slot, account);
                 let key = StorageKey::new(AccountTreeId::new(account), H256(slot));
                 let mut storage = storage.borrow_mut();
                 let value = storage.read_value(&key);
@@ -347,7 +347,7 @@ impl CheatcodeTracer {
                 value,
             }) => {
                 tracing::info!(
-                    "Serializing address {:?} with key {:?} to object {:?}",
+                    "👷 Serializing address {:?} with key {:?} to object {:?}",
                     value,
                     value_key,
                     object_key
@@ -370,7 +370,7 @@ impl CheatcodeTracer {
                 value,
             }) => {
                 tracing::info!(
-                    "Serializing bool {:?} with key {:?} to object {:?}",
+                    "👷 Serializing bool {:?} with key {:?} to object {:?}",
                     value,
                     value_key,
                     object_key
@@ -391,7 +391,7 @@ impl CheatcodeTracer {
                 value,
             }) => {
                 tracing::info!(
-                    "Serializing uint256 {:?} with key {:?} to object {:?}",
+                    "👷 Serializing uint256 {:?} with key {:?} to object {:?}",
                     value,
                     value_key,
                     object_key

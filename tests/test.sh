@@ -76,7 +76,7 @@ fi
 build_zkforge "foundry-zksync"
 
 echo "Running tests..."
-"${BINARY_PATH}" build --use "./${SOLC}"
+"${BINARY_PATH}" zkbuild --use "./${SOLC}"
 RUST_LOG=debug "${BINARY_PATH}" test --use "./${SOLC}"
 
 # cleanup

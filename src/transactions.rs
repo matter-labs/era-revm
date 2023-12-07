@@ -5,6 +5,7 @@ use era_test_node::{
     },
     system_contracts,
 };
+use ethabi::ParamType;
 use multivm::{interface::VmExecutionResultAndLogs, vm_refunds_enhancement::ToTracerPointer};
 use revm::{
     primitives::{
@@ -186,7 +187,7 @@ where
         show_vm_details: ShowVMDetails::None,
         show_gas_details: ShowGasDetails::None,
         resolve_hashes: false,
-        system_contracts_options: system_contracts::Options::BuiltInWithoutSecurity,
+        system_contracts_options: system_contracts::Options::BuiltInTxResult,
     };
     let node = InMemoryNode::new(Some(fork_details), None, config);
 
@@ -211,22 +212,28 @@ where
     let maybe_contract_address = contract_address_from_tx_result(&tx_result);
 
     let execution_result = match tx_result.result {
-        multivm::interface::ExecutionResult::Success { .. } => {
+        multivm::interface::ExecutionResult::Success { output, .. } => {
             revm::primitives::ExecutionResult::Success {
                 reason: Eval::Return,
                 gas_used: env.tx.gas_limit - tx_result.refunds.gas_refunded as u64,
                 gas_refunded: tx_result.refunds.gas_refunded as u64,
                 logs: vec![],
                 output: revm::primitives::Output::Create(
-                    Bytes::new(), // FIXME (function results)
+                    Bytes::from(decode_l2_tx_result(output)),
                     maybe_contract_address.map(h160_to_address),
                 ),
             }
         }
-        multivm::interface::ExecutionResult::Revert { .. } => {
+        multivm::interface::ExecutionResult::Revert { output } => {
+            let output = match output {
+                multivm::interface::VmRevertReason::General { data, .. } => data,
+                multivm::interface::VmRevertReason::Unknown { data, .. } => data,
+                _ => Vec::new(),
+            };
+
             revm::primitives::ExecutionResult::Revert {
                 gas_used: env.tx.gas_limit - tx_result.refunds.gas_refunded as u64,
-                output: Bytes::new(), // FIXME (function results)
+                output: Bytes::from(output),
             }
         }
         multivm::interface::ExecutionResult::Halt { reason } => {
@@ -325,6 +332,14 @@ where
         result: execution_result,
         state,
     })
+}
+
+fn decode_l2_tx_result(output: Vec<u8>) -> Vec<u8> {
+    ethabi::decode(&vec![ParamType::Bytes], &output)
+        .ok()
+        .and_then(|result| result.first().cloned())
+        .and_then(|result| result.into_bytes())
+        .unwrap_or_default()
 }
 
 #[cfg(test)]

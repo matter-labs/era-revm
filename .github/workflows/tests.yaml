@@ -58,10 +58,6 @@ jobs:
       run: |
         git clone https://github.com/matter-labs/zkfoundry-smoke-test
         cd zkfoundry-smoke-test
-        git fetch --all
-        git checkout bf18e30fe928e50066e131878a9583f404aaa0d7
-        git rev-parse HEAD
-        cat smoke-test.sh
         ./smoke-test.sh
 
   cheatcodes:

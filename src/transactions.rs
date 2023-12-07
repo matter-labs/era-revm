@@ -187,7 +187,7 @@ where
         show_vm_details: ShowVMDetails::None,
         show_gas_details: ShowGasDetails::None,
         resolve_hashes: false,
-        system_contracts_options: system_contracts::Options::BuiltInTxResult,
+        system_contracts_options: system_contracts::Options::BuiltInWithoutSecurity,
     };
     let node = InMemoryNode::new(Some(fork_details), None, config);
 

@@ -78,6 +78,7 @@ abigen!(
         function toString(bytes value)
         function warp(uint256 timestamp)
         function writeFile(string path, string value)
+        function writeJson(string json, string path)
     ]"#
 );
 
@@ -480,6 +481,14 @@ impl CheatcodeTracer {
             WriteFile(WriteFileCall { path, value }) => {
                 tracing::info!("👷 Writing data to file in path {}", path);
                 fs::write(path, value).expect("Failed to write file");
+            }
+            WriteJson(WriteJsonCall { path, json }) => {
+                tracing::info!("👷 Writing json data to file in path {}", path);
+                let json: serde_json::Value =
+                    serde_json::from_str(&json).expect("Failed to parse json");
+                let formatted_json =
+                    serde_json::to_string_pretty(&json).expect("Failed to format json");
+                fs::write(path, formatted_json).expect("Failed to write file");
             }
         };
     }

@@ -11,6 +11,7 @@ use multivm::vm_refunds_enhancement::{
 use multivm::zk_evm_1_3_1::zkevm_opcode_defs::RET_IMPLICIT_RETURNDATA_PARAMS_REGISTER;
 use multivm::zk_evm_1_3_3::tracing::{BeforeExecutionData, VmLocalStateData};
 use multivm::zk_evm_1_3_3::vm_state::PrimitiveValue;
+use std::collections::HashMap;
 use std::fmt::Debug;
 use zk_evm::zkevm_opcode_defs::{FatPointer, Opcode, CALL_IMPLICIT_CALLDATA_FAT_PTR_REGISTER};
 use zksync_basic_types::{AccountTreeId, Address, H160, H256, U256};
@@ -63,6 +64,9 @@ abigen!(
         function getNonce(address account)
         function load(address account, bytes32 slot)
         function roll(uint256 blockNumber)
+        function serializeAddress(string objectKey, string valueKey, address value)
+        function serializeBool(string objectKey, string valueKey, bool value)
+        function serializeUint(string objectKey, string valueKey, uint256 value)
         function setNonce(address account, uint64 nonce)
         function store(address account, bytes32 slot, bytes32 value)
         function startPrank(address sender)
@@ -85,6 +89,7 @@ pub struct CheatcodeTracer {
     return_data: Option<Vec<U256>>,
     return_ptr: Option<FatPointer>,
     near_calls: usize,
+    serialized_objects: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone)]
@@ -259,6 +264,7 @@ impl CheatcodeTracer {
             near_calls: 0,
             return_data: None,
             return_ptr: None,
+            serialized_objects: HashMap::new(),
         }
     }
 
@@ -334,6 +340,71 @@ impl CheatcodeTracer {
                     u256_to_h256(pack_block_info(block_number.as_u64(), block_timestamp)),
                     &mut storage,
                 );
+            }
+            SerializeAddress(SerializeAddressCall {
+                object_key,
+                value_key,
+                value,
+            }) => {
+                tracing::info!(
+                    "Serializing address {:?} with key {:?} to object {:?}",
+                    value,
+                    value_key,
+                    object_key
+                );
+                let json_value = serde_json::json!({
+                    value_key: value
+                });
+
+                //write to serialized_objects
+                self.serialized_objects
+                    .insert(object_key.clone(), json_value.to_string());
+
+                let address = Address::from(value);
+                let address_with_checksum = to_checksum(&address, None);
+                self.add_trimmed_return_data(address_with_checksum.as_bytes());
+            }
+            SerializeBool(SerializeBoolCall {
+                object_key,
+                value_key,
+                value,
+            }) => {
+                tracing::info!(
+                    "Serializing bool {:?} with key {:?} to object {:?}",
+                    value,
+                    value_key,
+                    object_key
+                );
+                let json_value = serde_json::json!({
+                    value_key: value
+                });
+
+                self.serialized_objects
+                    .insert(object_key.clone(), json_value.to_string());
+
+                let bool_value = value.to_string();
+                self.add_trimmed_return_data(bool_value.as_bytes());
+            }
+            SerializeUint(SerializeUintCall {
+                object_key,
+                value_key,
+                value,
+            }) => {
+                tracing::info!(
+                    "Serializing uint256 {:?} with key {:?} to object {:?}",
+                    value,
+                    value_key,
+                    object_key
+                );
+                let json_value = serde_json::json!({
+                    value_key: value
+                });
+
+                self.serialized_objects
+                    .insert(object_key.clone(), json_value.to_string());
+
+                let uint_value = value.to_string();
+                self.add_trimmed_return_data(uint_value.as_bytes());
             }
             SetNonce(SetNonceCall { account, nonce }) => {
                 tracing::info!("👷 Setting nonce for {account:?} to {nonce}");

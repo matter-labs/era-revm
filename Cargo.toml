@@ -7,14 +7,15 @@ edition = "2021"
 
 [dependencies]
 revm = { version = "3.5.0" }
-era_test_node = { git = "https://github.com/matter-labs/era-test-node.git", rev = "64835d25a6e4b1540a091ff0d805b01227213969" }
-zksync_basic_types = { git = "https://github.com/matter-labs/zksync-era.git", rev = "bd268ac02bc3530c1d3247cb9496c3e13c2e52d9" }
-zksync_types = { git = "https://github.com/matter-labs/zksync-era.git", rev = "bd268ac02bc3530c1d3247cb9496c3e13c2e52d9" }
-zksync_state = { git = "https://github.com/matter-labs/zksync-era.git", rev = "bd268ac02bc3530c1d3247cb9496c3e13c2e52d9" }
-multivm = { git = "https://github.com/matter-labs/zksync-era.git", rev = "bd268ac02bc3530c1d3247cb9496c3e13c2e52d9" }
-zksync_web3_decl = { git = "https://github.com/matter-labs/zksync-era.git", rev = "bd268ac02bc3530c1d3247cb9496c3e13c2e52d9" }
-zksync_utils = { git = "https://github.com/matter-labs/zksync-era.git", rev = "bd268ac02bc3530c1d3247cb9496c3e13c2e52d9" }
+era_test_node = { git = "https://github.com/matter-labs/era-test-node.git", rev = "a41a33464aadc7735f56071ca9a968659bb39117" }
+zksync_basic_types = { git = "https://github.com/matter-labs/zksync-era.git", rev = "fcf8d89b98012d3972d00e991ad4e55edf4848f6" }
+zksync_types = { git = "https://github.com/matter-labs/zksync-era.git", rev = "fcf8d89b98012d3972d00e991ad4e55edf4848f6" }
+zksync_state = { git = "https://github.com/matter-labs/zksync-era.git", rev = "fcf8d89b98012d3972d00e991ad4e55edf4848f6" }
+multivm = { git = "https://github.com/matter-labs/zksync-era.git", rev = "fcf8d89b98012d3972d00e991ad4e55edf4848f6" }
+zksync_web3_decl = { git = "https://github.com/matter-labs/zksync-era.git", rev = "fcf8d89b98012d3972d00e991ad4e55edf4848f6" }
+zksync_utils = { git = "https://github.com/matter-labs/zksync-era.git", rev = "fcf8d89b98012d3972d00e991ad4e55edf4848f6" }
 zk_evm = { git = "https://github.com/matter-labs/era-zk_evm.git", tag = "v1.3.3-rc1"}
+tokio = { version = "1", features = ["time", "rt"] }
 
 ethabi = "18.0.0"
 serde = { version = "1.0", features = ["derive"] }

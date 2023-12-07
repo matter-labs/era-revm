@@ -1,15 +1,25 @@
-use era_test_node::fork::{ForkSource, ForkStorage};
+use crate::backend::Backend;
+use crate::db::RevmDatabaseForEra;
+use era_test_node::cache::CacheConfig;
+use era_test_node::fork::{ForkDetails, ForkSource, ForkStorage};
+use era_test_node::http_fork_source::HttpForkSource;
+use era_test_node::system_contracts::Options;
 use era_test_node::utils::bytecode_to_factory_dep;
+use ethers::types::{BlockId, BlockNumber};
 use ethers::{abi::AbiDecode, prelude::abigen};
 use multivm::interface::dyn_tracers::vm_1_3_3::DynTracer;
 use multivm::interface::tracer::TracerExecutionStatus;
 use multivm::vm_refunds_enhancement::{
-    BootloaderState, HistoryMode, SimpleMemory, VmTracer, ZkSyncVmState,
+    BootloaderState, HistoryDisabled, HistoryMode, SimpleMemory, StorageOracle, VmTracer,
+    ZkSyncVmState,
 };
 use multivm::zk_evm_1_3_3::tracing::{BeforeExecutionData, VmLocalStateData};
+use std::cell::RefCell;
 use std::fmt::Debug;
+use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 use zk_evm::zkevm_opcode_defs::{FatPointer, Opcode, CALL_IMPLICIT_CALLDATA_FAT_PTR_REGISTER};
-use zksync_basic_types::{AccountTreeId, H160};
+use zksync_basic_types::{AccountTreeId, L2ChainId, H160};
 use zksync_state::{ReadStorage, StoragePtr, StorageView, WriteStorage};
 use zksync_types::{
     block::{pack_block_info, unpack_block_info},
@@ -24,7 +34,7 @@ const CHEATCODE_ADDRESS: H160 = H160([
     113, 9, 112, 158, 207, 169, 26, 128, 98, 111, 243, 152, 157, 104, 246, 127, 91, 29, 209, 45,
 ]);
 
-type ForkStorageView<S> = StorageView<ForkStorage<S>>;
+type SimpleMemoryHistoryDisabled = SimpleMemory<HistoryDisabled>;
 
 abigen!(
     CheatcodeContract,
@@ -34,26 +44,36 @@ abigen!(
         function setNonce(address account, uint64 nonce)
         function roll(uint256 blockNumber)
         function warp(uint256 timestamp)
-    ]"#
+        function createSelectFork(string calldata url, uint256 blockNumber) external returns (uint256)
+    ]"# // function createFork(string calldata url, uint256 blockNumber) external returns (uint256)
+        // function createFork(string calldata url) external returns (uint256)
+        // function createSelectFork(string calldata url) external returns (uint256)
+        // function selectFork(uint256) external
+        // function activeFork() external returns (uint256)
+        // function rollFork(uint256) external
+        // function rollFork(uint256 forkId, uint256 blockNumber) external
 );
 
 #[derive(Debug, Clone)]
-enum FinishCycleActions {}
+enum FinishCycleActions {
+    CreateForkSelect {
+        url: String,
+        block_number: BlockNumber,
+    },
+}
 
 #[derive(Clone, Debug, Default)]
 pub struct CheatcodeTracer {
     actions: Vec<FinishCycleActions>,
 }
 
-impl<S: std::fmt::Debug + ForkSource, H: HistoryMode> DynTracer<ForkStorageView<S>, SimpleMemory<H>>
-    for CheatcodeTracer
-{
+impl DynTracer<Backend, SimpleMemoryHistoryDisabled> for CheatcodeTracer {
     fn before_execution(
         &mut self,
         state: VmLocalStateData<'_>,
         data: BeforeExecutionData,
-        memory: &SimpleMemory<H>,
-        storage: StoragePtr<ForkStorageView<S>>,
+        memory: &SimpleMemoryHistoryDisabled,
+        storage: StoragePtr<Backend>,
     ) {
         if let Opcode::NearCall(_call) = data.opcode.variant.opcode {
             let current = state.vm_local_state.callstack.current;
@@ -90,15 +110,33 @@ impl<S: std::fmt::Debug + ForkSource, H: HistoryMode> DynTracer<ForkStorageView<
     }
 }
 
-impl<S: std::fmt::Debug + ForkSource, H: HistoryMode> VmTracer<ForkStorageView<S>, H>
-    for CheatcodeTracer
-{
+impl VmTracer<Backend, HistoryDisabled> for CheatcodeTracer {
     fn finish_cycle(
         &mut self,
-        _state: &mut ZkSyncVmState<ForkStorageView<S>, H>,
+        _state: &mut ZkSyncVmState<Backend, HistoryDisabled>,
         _bootloader_state: &mut BootloaderState,
+        _storage: StoragePtr<Backend>,
     ) -> TracerExecutionStatus {
-        while let Some(_action) = self.actions.pop() {}
+        while let Some(action) = self.actions.pop() {
+            match action {
+                FinishCycleActions::CreateForkSelect { url, block_number } => {
+                    let rt = tokio::runtime::Handle::current();
+                    let fork_details = rt.block_on(async move {
+                        ForkDetails::from_network(
+                            &url,
+                            Some(block_number.as_number().unwrap().as_u64()),
+                            CacheConfig::None,
+                        )
+                        .await
+                    });
+                    let fork_id = _storage
+                        .borrow_mut()
+                        .create_fork(fork_details.clone(), Options::default());
+                    _storage.borrow_mut().activate_fork(fork_id);
+                }
+            }
+        }
+
         TracerExecutionStatus::Continue
     }
 }
@@ -108,12 +146,12 @@ impl CheatcodeTracer {
         CheatcodeTracer { actions: vec![] }
     }
 
-    pub fn dispatch_cheatcode<S: std::fmt::Debug + ForkSource, H: HistoryMode>(
+    pub fn dispatch_cheatcode(
         &mut self,
         _state: VmLocalStateData<'_>,
         _data: BeforeExecutionData,
-        _memory: &SimpleMemory<H>,
-        storage: StoragePtr<ForkStorageView<S>>,
+        _memory: &SimpleMemoryHistoryDisabled,
+        storage: StoragePtr<Backend>,
         call: CheatcodeContractCalls,
     ) {
         use CheatcodeContractCalls::*;
@@ -204,6 +242,13 @@ impl CheatcodeTracer {
                     key,
                     u256_to_h256(pack_block_info(block_number, timestamp.as_u64())),
                 );
+            }
+            CreateSelectFork(CreateSelectForkCall { url, block_number }) => {
+                tracing::info!("Creating and selecting fork {}", url,);
+                self.actions.push(FinishCycleActions::CreateForkSelect {
+                    url,
+                    block_number: BlockNumber::Number(block_number.as_u64().into()),
+                });
             }
         };
     }

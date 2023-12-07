@@ -169,7 +169,7 @@ where
 
     let (l2_num, l2_ts) = (num * 2, ts * 2);
     let fork_details = ForkDetails {
-        fork_source: &era_db,
+        fork_source: era_db.clone(),
         l1_block: L1BatchNumber(num as u32),
         l2_block: Block::default(),
         l2_miniblock: l2_num,
@@ -202,7 +202,8 @@ where
         .run_l2_tx_raw(
             l2_tx,
             multivm::interface::TxExecutionMode::VerifyExecute,
-            vec![CheatcodeTracer::new().into_tracer_pointer()],
+            vec![],
+            // vec![CheatcodeTracer::new().into_tracer_pointer()],
         )
         .unwrap();
 

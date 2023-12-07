@@ -12,28 +12,44 @@ use std::{
 
 use crate::conversion_utils::{h256_to_b256, h256_to_h160};
 use era_test_node::fork::ForkSource;
+use era_test_node::http_fork_source::HttpForkSource;
 use eyre::ErrReport;
+use multivm::vm_refunds_enhancement::{AppDataFrameManagerWithHistory, HistoryDisabled};
+use revm::primitives::{AccountInfo, Address, B256};
 use revm::{
     primitives::{Bytecode, Bytes},
     Database,
 };
+use zksync_basic_types::web3::types::Index;
 use zksync_basic_types::{
     web3::signing::keccak256, AccountTreeId, MiniblockNumber, H160, H256, U256,
 };
+use zksync_state::StoragePtr;
+use zksync_types::api::{Block, BlockDetails, BlockNumber, BridgeAddresses, TransactionVariant};
 use zksync_types::{
     api::{BlockIdVariant, Transaction, TransactionDetails},
-    StorageKey, ACCOUNT_CODE_STORAGE_ADDRESS, L2_ETH_TOKEN_ADDRESS, NONCE_HOLDER_ADDRESS,
-    SYSTEM_CONTEXT_ADDRESS,
+    StorageKey, StorageLogQuery, ACCOUNT_CODE_STORAGE_ADDRESS, L2_ETH_TOKEN_ADDRESS,
+    NONCE_HOLDER_ADDRESS, SYSTEM_CONTEXT_ADDRESS,
 };
 
 use zksync_utils::{address_to_h256, h256_to_u256, u256_to_h256};
+use zksync_web3_decl::types::Token;
 
 use crate::conversion_utils::{h160_to_address, revm_u256_to_h256, u256_to_revm_u256};
 
-#[derive(Default, Clone)]
+#[derive(Default)]
 pub struct RevmDatabaseForEra<DB> {
     pub db: Arc<Mutex<Box<DB>>>,
     pub current_block: u64,
+}
+
+impl<DB> Clone for RevmDatabaseForEra<DB> {
+    fn clone(&self) -> Self {
+        Self {
+            db: self.db.clone(),
+            current_block: self.current_block,
+        }
+    }
 }
 
 impl<DB> Debug for RevmDatabaseForEra<DB> {
@@ -144,7 +160,7 @@ where
     }
 }
 
-impl<DB: Database + Send> ForkSource for &RevmDatabaseForEra<DB>
+impl<DB: Database + Send> ForkSource for RevmDatabaseForEra<DB>
 where
     <DB as revm::Database>::Error: Debug,
 {
@@ -266,6 +282,127 @@ where
         todo!()
     }
 }
+//
+// #[derive(Clone, Debug)]
+// pub struct EraRevmHttpForkSource(HttpForkSource);
+//
+// impl ForkSource for EraRevmHttpForkSource {
+//     fn get_storage_at(
+//         &self,
+//         address: zksync_basic_types::Address,
+//         idx: U256,
+//         block: Option<BlockIdVariant>,
+//     ) -> eyre::Result<H256> {
+//         self.0.get_storage_at(address, idx, block)
+//     }
+//
+//     fn get_bytecode_by_hash(&self, hash: H256) -> eyre::Result<Option<Vec<u8>>> {
+//         self.0.get_bytecode_by_hash(hash)
+//     }
+//
+//     fn get_transaction_by_hash(&self, hash: H256) -> eyre::Result<Option<Transaction>> {
+//         self.0.get_transaction_by_hash(hash)
+//     }
+//
+//     fn get_transaction_details(&self, hash: H256) -> eyre::Result<Option<TransactionDetails>> {
+//         self.0.get_transaction_details(hash)
+//     }
+//
+//     fn get_raw_block_transactions(
+//         &self,
+//         block_number: MiniblockNumber,
+//     ) -> eyre::Result<Vec<zksync_types::Transaction>> {
+//         self.0.get_raw_block_transactions(block_number)
+//     }
+//
+//     fn get_block_by_hash(
+//         &self,
+//         hash: H256,
+//         full_transactions: bool,
+//     ) -> eyre::Result<Option<Block<TransactionVariant>>> {
+//         self.0.get_block_by_hash(hash, full_transactions)
+//     }
+//
+//     fn get_block_by_number(
+//         &self,
+//         block_number: BlockNumber,
+//         full_transactions: bool,
+//     ) -> eyre::Result<Option<Block<TransactionVariant>>> {
+//         self.0.get_block_by_number(block_number, full_transactions)
+//     }
+//
+//     fn get_block_details(&self, miniblock: MiniblockNumber) -> eyre::Result<Option<BlockDetails>> {
+//         self.0.get_block_details(miniblock)
+//     }
+//
+//     fn get_block_transaction_count_by_hash(&self, block_hash: H256) -> eyre::Result<Option<U256>> {
+//         self.0.get_block_transaction_count_by_hash(block_hash)
+//     }
+//
+//     fn get_block_transaction_count_by_number(
+//         &self,
+//         block_number: BlockNumber,
+//     ) -> eyre::Result<Option<U256>> {
+//         self.0.get_block_transaction_count_by_number(block_number)
+//     }
+//
+//     fn get_transaction_by_block_hash_and_index(
+//         &self,
+//         block_hash: H256,
+//         index: Index,
+//     ) -> eyre::Result<Option<Transaction>> {
+//         self.0
+//             .get_transaction_by_block_hash_and_index(block_hash, index)
+//     }
+//
+//     fn get_transaction_by_block_number_and_index(
+//         &self,
+//         block_number: BlockNumber,
+//         index: Index,
+//     ) -> eyre::Result<Option<Transaction>> {
+//         self.0
+//             .get_transaction_by_block_number_and_index(block_number, index)
+//     }
+//
+//     fn get_bridge_contracts(&self) -> eyre::Result<BridgeAddresses> {
+//         self.0.get_bridge_contracts()
+//     }
+//
+//     fn get_confirmed_tokens(&self, from: u32, limit: u8) -> eyre::Result<Vec<Token>> {
+//         self.0.get_confirmed_tokens(from, limit)
+//     }
+// }
+//
+// impl Database for EraRevmHttpForkSource {
+//     type Error = String;
+//
+//     fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
+//         todo!()
+//     }
+//
+//     fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
+//         // self.0.get_bytecode_by_hash(code_hash)?
+//         todo!()
+//     }
+//
+//     fn storage(
+//         &mut self,
+//         address: Address,
+//         index: revm::primitives::U256,
+//     ) -> Result<revm::primitives::U256, Self::Error> {
+//         self.0
+//             .get_storage_at(address, revm_u256_to_u256(index), None)?
+//     }
+//
+//     fn block_hash(&mut self, number: revm::primitives::U256) -> Result<B256, Self::Error> {
+//         // let a = self.0.
+//         //     .get_block_by_number(number.as_u64(), false)
+//         //     .unwrap()
+//         //     .unwrap();
+//         // Ok(a.hash)
+//         todo!()
+//     }
+// }
 
 #[cfg(test)]
 mod tests {

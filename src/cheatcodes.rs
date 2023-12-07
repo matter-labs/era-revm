@@ -12,6 +12,7 @@ use multivm::zk_evm_1_3_1::zkevm_opcode_defs::RET_IMPLICIT_RETURNDATA_PARAMS_REG
 use multivm::zk_evm_1_3_3::tracing::{BeforeExecutionData, VmLocalStateData};
 use multivm::zk_evm_1_3_3::vm_state::PrimitiveValue;
 use std::fmt::Debug;
+use std::fs;
 use zk_evm::zkevm_opcode_defs::{FatPointer, Opcode, CALL_IMPLICIT_CALLDATA_FAT_PTR_REGISTER};
 use zksync_basic_types::{AccountTreeId, Address, H160, H256, U256};
 use zksync_state::{ReadStorage, StoragePtr, StorageView};
@@ -62,6 +63,7 @@ abigen!(
         function etch(address who, bytes calldata code)
         function getNonce(address account)
         function load(address account, bytes32 slot)
+        function readFile(string path)
         function roll(uint256 blockNumber)
         function setNonce(address account, uint64 nonce)
         function store(address account, bytes32 slot, bytes32 value)
@@ -75,6 +77,7 @@ abigen!(
         function toString(bytes32 value)
         function toString(bytes value)
         function warp(uint256 timestamp)
+        function writeFile(string path, string value)
     ]"#
 );
 
@@ -319,6 +322,12 @@ impl CheatcodeTracer {
                 let value = storage.read_value(&key);
                 self.return_data = Some(vec![h256_to_u256(value)]);
             }
+            ReadFile(ReadFileCall { path }) => {
+                tracing::info!("👷 Reading file in path {}", path);
+
+                let data = fs::read(path).expect("Failed to read file");
+                self.add_trimmed_return_data(&data);
+            }
             Roll(RollCall { block_number }) => {
                 tracing::info!("👷 Setting block number to {}", block_number);
 
@@ -467,6 +476,10 @@ impl CheatcodeTracer {
                     u256_to_h256(pack_block_info(block_number, timestamp.as_u64())),
                     &mut storage,
                 );
+            }
+            WriteFile(WriteFileCall { path, value }) => {
+                tracing::info!("👷 Writing data to file in path {}", path);
+                fs::write(path, value).expect("Failed to write file");
             }
         };
     }

@@ -319,7 +319,11 @@ impl CheatcodeTracer {
                 self.return_data = Some(vec![account_nonce]);
             }
             Load(LoadCall { account, slot }) => {
-                tracing::info!("👷 Getting storage slot {:?} for account {:?}", slot, account);
+                tracing::info!(
+                    "👷 Getting storage slot {:?} for account {:?}",
+                    slot,
+                    account
+                );
                 let key = StorageKey::new(AccountTreeId::new(account), H256(slot));
                 let mut storage = storage.borrow_mut();
                 let value = storage.read_value(&key);

@@ -12,28 +12,21 @@ use std::{
 
 use crate::conversion_utils::{h256_to_b256, h256_to_h160};
 use era_test_node::fork::ForkSource;
-use era_test_node::http_fork_source::HttpForkSource;
 use eyre::ErrReport;
-use multivm::vm_refunds_enhancement::{AppDataFrameManagerWithHistory, HistoryDisabled};
-use revm::primitives::{AccountInfo, Address, B256};
 use revm::{
     primitives::{Bytecode, Bytes},
     Database,
 };
-use zksync_basic_types::web3::types::Index;
 use zksync_basic_types::{
     web3::signing::keccak256, AccountTreeId, MiniblockNumber, H160, H256, U256,
 };
-use zksync_state::StoragePtr;
-use zksync_types::api::{Block, BlockDetails, BlockNumber, BridgeAddresses, TransactionVariant};
 use zksync_types::{
     api::{BlockIdVariant, Transaction, TransactionDetails},
-    StorageKey, StorageLogQuery, ACCOUNT_CODE_STORAGE_ADDRESS, L2_ETH_TOKEN_ADDRESS,
-    NONCE_HOLDER_ADDRESS, SYSTEM_CONTEXT_ADDRESS,
+    StorageKey, ACCOUNT_CODE_STORAGE_ADDRESS, L2_ETH_TOKEN_ADDRESS, NONCE_HOLDER_ADDRESS,
+    SYSTEM_CONTEXT_ADDRESS,
 };
 
 use zksync_utils::{address_to_h256, h256_to_u256, u256_to_h256};
-use zksync_web3_decl::types::Token;
 
 use crate::conversion_utils::{h160_to_address, revm_u256_to_h256, u256_to_revm_u256};
 

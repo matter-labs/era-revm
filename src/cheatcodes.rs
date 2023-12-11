@@ -13,6 +13,7 @@ use multivm::zk_evm_1_3_3::tracing::{BeforeExecutionData, VmLocalStateData};
 use multivm::zk_evm_1_3_3::vm_state::PrimitiveValue;
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::fs;
 use zk_evm::zkevm_opcode_defs::{FatPointer, Opcode, CALL_IMPLICIT_CALLDATA_FAT_PTR_REGISTER};
 use zksync_basic_types::{AccountTreeId, Address, H160, H256, U256};
 use zksync_state::{ReadStorage, StoragePtr, StorageView};
@@ -63,6 +64,7 @@ abigen!(
         function etch(address who, bytes calldata code)
         function getNonce(address account)
         function load(address account, bytes32 slot)
+        function readFile(string path)
         function roll(uint256 blockNumber)
         function serializeAddress(string objectKey, string valueKey, address value)
         function serializeBool(string objectKey, string valueKey, bool value)
@@ -79,6 +81,9 @@ abigen!(
         function toString(bytes32 value)
         function toString(bytes value)
         function warp(uint256 timestamp)
+        function writeFile(string path, string value)
+        function writeJson(string json, string path)
+        function writeJson(string json, string path, string valueKey)
     ]"#
 );
 
@@ -329,6 +334,14 @@ impl CheatcodeTracer {
                 let value = storage.read_value(&key);
                 self.return_data = Some(vec![h256_to_u256(value)]);
             }
+            ReadFile(ReadFileCall { path }) => {
+                tracing::info!("👷 Reading file in path {}", path);
+                let Ok(data) = fs::read(path) else {
+                    tracing::error!("Failed to read file");
+                    return;
+                };
+                self.add_trimmed_return_data(&data);
+            }
             Roll(RollCall { block_number }) => {
                 tracing::info!("👷 Setting block number to {}", block_number);
 
@@ -542,6 +555,54 @@ impl CheatcodeTracer {
                     u256_to_h256(pack_block_info(block_number, timestamp.as_u64())),
                     &mut storage,
                 );
+            }
+            WriteFile(WriteFileCall { path, value }) => {
+                tracing::info!("👷 Writing data to file in path {}", path);
+                if fs::write(path, value).is_err() {
+                    tracing::error!("Failed to write file");
+                }
+            }
+            WriteJson(WriteJsonCall { path, json }) => {
+                tracing::info!("👷 Writing json data to file in path {}", path);
+                let Ok(json) = serde_json::from_str::<serde_json::Value>(&json) else {
+                    tracing::error!("Failed to parse json");
+                    return;
+                };
+                let Ok(formatted_json) = serde_json::to_string_pretty(&json) else {
+                    tracing::error!("Failed to format json");
+                    return;
+                };
+                if fs::write(path, formatted_json).is_err() {
+                    tracing::error!("Failed to write file");
+                }
+            }
+            WriteJsonWithJsonAndPath(WriteJsonWithJsonAndPathCall {
+                path,
+                json,
+                value_key,
+            }) => {
+                tracing::info!("👷 Writing json data to file in path {path} with key {value_key}");
+
+                let Ok(file) = fs::read_to_string(&path) else {
+                    tracing::error!("Failed to read file");
+                    return;
+                };
+                let Ok(mut file_json) = serde_json::from_str::<serde_json::Value>(&file) else {
+                    tracing::error!("Failed to parse json");
+                    return;
+                };
+                let Ok(json) = serde_json::from_str::<serde_json::Value>(&json) else {
+                    tracing::error!("Failed to parse json");
+                    return;
+                };
+                file_json[value_key] = json;
+                let Ok(formatted_json) = serde_json::to_string_pretty(&file_json) else {
+                    tracing::error!("Failed to format json");
+                    return;
+                };
+                if fs::write(path, formatted_json).is_err() {
+                    tracing::error!("Failed to write file");
+                }
             }
         };
     }

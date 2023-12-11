@@ -11,9 +11,9 @@ use multivm::vm_refunds_enhancement::{
 use multivm::zk_evm_1_3_1::zkevm_opcode_defs::RET_IMPLICIT_RETURNDATA_PARAMS_REGISTER;
 use multivm::zk_evm_1_3_3::tracing::{BeforeExecutionData, VmLocalStateData};
 use multivm::zk_evm_1_3_3::vm_state::PrimitiveValue;
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fs;
-use std::collections::HashMap;
 use zk_evm::zkevm_opcode_defs::{FatPointer, Opcode, CALL_IMPLICIT_CALLDATA_FAT_PTR_REGISTER};
 use zksync_basic_types::{AccountTreeId, Address, H160, H256, U256};
 use zksync_state::{ReadStorage, StoragePtr, StorageView};
@@ -95,7 +95,10 @@ pub struct CheatcodeTracer {
     return_ptr: Option<FatPointer>,
     near_calls: usize,
     serialized_objects: HashMap<String, String>,
+}
+
 #[derive(Debug, Clone)]
+enum FinishCycleOneTimeActions {
     StorageWrite {
         key: StorageKey,
         read_value: H256,

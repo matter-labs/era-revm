@@ -79,6 +79,7 @@ abigen!(
         function warp(uint256 timestamp)
         function writeFile(string path, string value)
         function writeJson(string json, string path)
+        function writeJson(string json, string path, string valueKey)
     ]"#
 );
 
@@ -325,8 +326,10 @@ impl CheatcodeTracer {
             }
             ReadFile(ReadFileCall { path }) => {
                 tracing::info!("👷 Reading file in path {}", path);
-
-                let data = fs::read(path).expect("Failed to read file");
+                let Ok(data) = fs::read(path) else {
+                    tracing::error!("Failed to read file");
+                    return;
+                };
                 self.add_trimmed_return_data(&data);
             }
             Roll(RollCall { block_number }) => {
@@ -480,15 +483,51 @@ impl CheatcodeTracer {
             }
             WriteFile(WriteFileCall { path, value }) => {
                 tracing::info!("👷 Writing data to file in path {}", path);
-                fs::write(path, value).expect("Failed to write file");
+                if fs::write(path, value).is_err() {
+                    tracing::error!("Failed to write file");
+                }
             }
             WriteJson(WriteJsonCall { path, json }) => {
                 tracing::info!("👷 Writing json data to file in path {}", path);
-                let json: serde_json::Value =
-                    serde_json::from_str(&json).expect("Failed to parse json");
-                let formatted_json =
-                    serde_json::to_string_pretty(&json).expect("Failed to format json");
-                fs::write(path, formatted_json).expect("Failed to write file");
+                let Ok(json) = serde_json::from_str::<serde_json::Value>(&json) else {
+                    tracing::error!("Failed to parse json");
+                    return;
+                };
+                let Ok(formatted_json) = serde_json::to_string_pretty(&json) else {
+                    tracing::error!("Failed to format json");
+                    return;
+                };
+                if fs::write(path, formatted_json).is_err() {
+                    tracing::error!("Failed to write file");
+                }
+            }
+            WriteJsonWithJsonAndPath(WriteJsonWithJsonAndPathCall {
+                path,
+                json,
+                value_key,
+            }) => {
+                tracing::info!("👷 Writing json data to file in path {path} with key {value_key}");
+
+                let Ok(file) = fs::read_to_string(&path) else {
+                    tracing::error!("Failed to read file");
+                    return;
+                };
+                let Ok(mut file_json) = serde_json::from_str::<serde_json::Value>(&file) else {
+                    tracing::error!("Failed to parse json");
+                    return;
+                };
+                let Ok(json) = serde_json::from_str::<serde_json::Value>(&json) else {
+                    tracing::error!("Failed to parse json");
+                    return;
+                };
+                file_json[value_key] = json;
+                let Ok(formatted_json) = serde_json::to_string_pretty(&file_json) else {
+                    tracing::error!("Failed to format json");
+                    return;
+                };
+                if fs::write(path, formatted_json).is_err() {
+                    tracing::error!("Failed to write file");
+                }
             }
         };
     }

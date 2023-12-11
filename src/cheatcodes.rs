@@ -14,6 +14,7 @@ use multivm::zk_evm_1_3_3::vm_state::PrimitiveValue;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fs;
+use std::process::Command;
 use zk_evm::zkevm_opcode_defs::{FatPointer, Opcode, CALL_IMPLICIT_CALLDATA_FAT_PTR_REGISTER};
 use zksync_basic_types::{AccountTreeId, Address, H160, H256, U256};
 use zksync_state::{ReadStorage, StoragePtr, StorageView};
@@ -62,6 +63,7 @@ abigen!(
         function addr(uint256 privateKey)
         function deal(address who, uint256 newBalance)
         function etch(address who, bytes calldata code)
+        function ffi(string[] args)
         function getNonce(address account)
         function load(address account, bytes32 slot)
         function readFile(string path)
@@ -299,6 +301,34 @@ impl CheatcodeTracer {
                 let (hash, code) = bytecode_to_factory_dep(code.0.into());
                 self.store_factory_dep(hash, code);
                 self.write_storage(code_key, u256_to_h256(hash), &mut storage.borrow_mut());
+            }
+            Ffi(FfiCall { args }) => {
+                tracing::info!("👷 Running ffi: {args:?}");
+                let Some(first_arg) = args.get(0) else {
+                    tracing::error!("Failed to run ffi: no args");
+                    return;
+                };
+                // TODO: set directory to root
+                let Ok(output) = Command::new(first_arg).args(&args[1..]).output() else {
+                    tracing::error!("Failed to run ffi");
+                    return;
+                };
+
+                // The stdout might be encoded on valid hex, or it might just be a string,
+                // so we need to determine which it is to avoid improperly encoding later.
+                let Ok(trimmed_stdout) = String::from_utf8(output.stdout) else {
+                    tracing::error!("Failed to parse ffi output");
+                    return;
+                };
+                let trimmed_stdout = trimmed_stdout.trim();
+                let encoded_stdout =
+                    if let Ok(hex) = hex::decode(trimmed_stdout.trim_start_matches("0x")) {
+                        hex
+                    } else {
+                        trimmed_stdout.as_bytes().to_vec()
+                    };
+
+                self.add_trimmed_return_data(&encoded_stdout);
             }
             GetNonce(GetNonceCall { account }) => {
                 tracing::info!("👷 Getting nonce for {account:?}");

@@ -58,10 +58,6 @@ jobs:
       run: |
         git clone https://github.com/matter-labs/zkfoundry-smoke-test
         cd zkfoundry-smoke-test
-        git fetch --all
-        git checkout bf18e30fe928e50066e131878a9583f404aaa0d7
-        git rev-parse HEAD
-        cat smoke-test.sh
         ./smoke-test.sh
 
   cheatcodes:
@@ -79,4 +75,4 @@ jobs:
           toolchain: nightly-2023-07-23
 
       - name: Test Cheatcodes
-        run: cd tests && ls -l && ls -l lib && ls -l lib/forge-std &&  ./test.sh
+        run: cd tests && ./test.sh

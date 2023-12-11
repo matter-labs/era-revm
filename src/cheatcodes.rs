@@ -13,6 +13,7 @@ use multivm::zk_evm_1_3_3::tracing::{BeforeExecutionData, VmLocalStateData};
 use multivm::zk_evm_1_3_3::vm_state::PrimitiveValue;
 use std::fmt::Debug;
 use std::fs;
+use std::collections::HashMap;
 use zk_evm::zkevm_opcode_defs::{FatPointer, Opcode, CALL_IMPLICIT_CALLDATA_FAT_PTR_REGISTER};
 use zksync_basic_types::{AccountTreeId, Address, H160, H256, U256};
 use zksync_state::{ReadStorage, StoragePtr, StorageView};
@@ -65,6 +66,9 @@ abigen!(
         function load(address account, bytes32 slot)
         function readFile(string path)
         function roll(uint256 blockNumber)
+        function serializeAddress(string objectKey, string valueKey, address value)
+        function serializeBool(string objectKey, string valueKey, bool value)
+        function serializeUint(string objectKey, string valueKey, uint256 value)
         function setNonce(address account, uint64 nonce)
         function store(address account, bytes32 slot, bytes32 value)
         function startPrank(address sender)
@@ -90,10 +94,8 @@ pub struct CheatcodeTracer {
     return_data: Option<Vec<U256>>,
     return_ptr: Option<FatPointer>,
     near_calls: usize,
-}
-
+    serialized_objects: HashMap<String, String>,
 #[derive(Debug, Clone)]
-enum FinishCycleOneTimeActions {
     StorageWrite {
         key: StorageKey,
         read_value: H256,
@@ -264,6 +266,7 @@ impl CheatcodeTracer {
             near_calls: 0,
             return_data: None,
             return_ptr: None,
+            serialized_objects: HashMap::new(),
         }
     }
 
@@ -278,7 +281,7 @@ impl CheatcodeTracer {
         use CheatcodeContractCalls::*;
         match call {
             Addr(AddrCall { private_key }) => {
-                tracing::info!("Getting address for private key");
+                tracing::info!("👷 Getting address for private key");
                 let Ok(address) = zksync_types::PackedEthSignature::address_from_private_key(
                     &u256_to_h256(private_key),
                 ) else {
@@ -318,7 +321,11 @@ impl CheatcodeTracer {
                 self.return_data = Some(vec![account_nonce]);
             }
             Load(LoadCall { account, slot }) => {
-                tracing::info!("Getting storage slot {:?} for account {:?}", slot, account);
+                tracing::info!(
+                    "👷 Getting storage slot {:?} for account {:?}",
+                    slot,
+                    account
+                );
                 let key = StorageKey::new(AccountTreeId::new(account), H256(slot));
                 let mut storage = storage.borrow_mut();
                 let value = storage.read_value(&key);
@@ -347,6 +354,71 @@ impl CheatcodeTracer {
                     u256_to_h256(pack_block_info(block_number.as_u64(), block_timestamp)),
                     &mut storage,
                 );
+            }
+            SerializeAddress(SerializeAddressCall {
+                object_key,
+                value_key,
+                value,
+            }) => {
+                tracing::info!(
+                    "👷 Serializing address {:?} with key {:?} to object {:?}",
+                    value,
+                    value_key,
+                    object_key
+                );
+                let json_value = serde_json::json!({
+                    value_key: value
+                });
+
+                //write to serialized_objects
+                self.serialized_objects
+                    .insert(object_key.clone(), json_value.to_string());
+
+                let address = Address::from(value);
+                let address_with_checksum = to_checksum(&address, None);
+                self.add_trimmed_return_data(address_with_checksum.as_bytes());
+            }
+            SerializeBool(SerializeBoolCall {
+                object_key,
+                value_key,
+                value,
+            }) => {
+                tracing::info!(
+                    "👷 Serializing bool {:?} with key {:?} to object {:?}",
+                    value,
+                    value_key,
+                    object_key
+                );
+                let json_value = serde_json::json!({
+                    value_key: value
+                });
+
+                self.serialized_objects
+                    .insert(object_key.clone(), json_value.to_string());
+
+                let bool_value = value.to_string();
+                self.add_trimmed_return_data(bool_value.as_bytes());
+            }
+            SerializeUint(SerializeUintCall {
+                object_key,
+                value_key,
+                value,
+            }) => {
+                tracing::info!(
+                    "👷 Serializing uint256 {:?} with key {:?} to object {:?}",
+                    value,
+                    value_key,
+                    object_key
+                );
+                let json_value = serde_json::json!({
+                    value_key: value
+                });
+
+                self.serialized_objects
+                    .insert(object_key.clone(), json_value.to_string());
+
+                let uint_value = value.to_string();
+                self.add_trimmed_return_data(uint_value.as_bytes());
             }
             SetNonce(SetNonceCall { account, nonce }) => {
                 tracing::info!("👷 Setting nonce for {account:?} to {nonce}");

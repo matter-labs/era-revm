@@ -19,14 +19,8 @@ contract FfiTest is Test {
         );
         require(success, "ffi failed");
 
-    console.log("rawData");
-        console.logBytes(rawData);
         bytes memory data = Utils.trimReturnBytes(rawData);
-        console.log("data");
-        console.logBytes(data);
-
         string memory output = abi.decode(data, (string));
-        console.log("output", output);
         require(
             keccak256(bytes(output)) == keccak256(bytes("ffi works")),
             "ffi failed"

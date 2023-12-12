@@ -9,7 +9,7 @@ use multivm::vm_refunds_enhancement::{
     BootloaderState, HistoryMode, SimpleMemory, VmTracer, ZkSyncVmState,
 };
 use multivm::zk_evm_1_3_1::zkevm_opcode_defs::RET_IMPLICIT_RETURNDATA_PARAMS_REGISTER;
-use multivm::zk_evm_1_3_3::tracing::{BeforeExecutionData, VmLocalStateData};
+use multivm::zk_evm_1_3_3::tracing::{AfterExecutionData, VmLocalStateData};
 use multivm::zk_evm_1_3_3::vm_state::PrimitiveValue;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -124,16 +124,35 @@ struct StartPrankOpts {
 impl<S: std::fmt::Debug + ForkSource, H: HistoryMode> DynTracer<ForkStorageView<S>, SimpleMemory<H>>
     for CheatcodeTracer
 {
-    fn before_execution(
+    fn after_execution(
         &mut self,
         state: VmLocalStateData<'_>,
-        data: BeforeExecutionData,
+        data: AfterExecutionData,
         memory: &SimpleMemory<H>,
         storage: StoragePtr<ForkStorageView<S>>,
     ) {
+        if self.return_data.is_some() {
+            if let Opcode::Ret(_call) = data.opcode.variant.opcode {
+                if self.near_calls == 0 {
+                    let ptr = state.vm_local_state.registers
+                        [RET_IMPLICIT_RETURNDATA_PARAMS_REGISTER as usize];
+                    let fat_data_pointer = FatPointer::from_u256(ptr.value);
+                    self.return_ptr = Some(fat_data_pointer);
+                } else {
+                    self.near_calls = self.near_calls.saturating_sub(1);
+                }
+            }
+        }
+
         if let Opcode::NearCall(_call) = data.opcode.variant.opcode {
+            if self.return_data.is_some() {
+                self.near_calls += 1;
+            }
+        }
+
+        if let Opcode::FarCall(_call) = data.opcode.variant.opcode {
             let current = state.vm_local_state.callstack.current;
-            if current.this_address != CHEATCODE_ADDRESS {
+            if current.code_address != CHEATCODE_ADDRESS {
                 return;
             }
             if current.code_page.0 == 0 || current.ergs_remaining == 0 {
@@ -155,39 +174,12 @@ impl<S: std::fmt::Debug + ForkSource, H: HistoryMode> DynTracer<ForkStorageView<
 
             // try to dispatch the cheatcode
             if let Ok(call) = CheatcodeContractCalls::decode(calldata.clone()) {
-                self.dispatch_cheatcode(state, data, memory, storage, call)
+                self.dispatch_cheatcode(state, data, memory, storage, call);
             } else {
                 tracing::error!(
-                    "Failed to decode cheatcode calldata (near call): {}",
+                    "Failed to decode cheatcode calldata (far call): {}",
                     hex::encode(calldata),
                 );
-            }
-        }
-    }
-
-    fn after_execution(
-        &mut self,
-        state: VmLocalStateData<'_>,
-        data: multivm::zk_evm_1_3_3::tracing::AfterExecutionData,
-        _memory: &SimpleMemory<H>,
-        _storage: StoragePtr<ForkStorageView<S>>,
-    ) {
-        if self.return_data.is_some() {
-            if let Opcode::Ret(_call) = data.opcode.variant.opcode {
-                if self.near_calls == 0 {
-                    let ptr = state.vm_local_state.registers
-                        [RET_IMPLICIT_RETURNDATA_PARAMS_REGISTER as usize];
-                    let fat_data_pointer = FatPointer::from_u256(ptr.value);
-                    self.return_ptr = Some(fat_data_pointer);
-                } else {
-                    self.near_calls = self.near_calls.saturating_sub(1);
-                }
-            }
-        }
-
-        if let Opcode::NearCall(_call) = data.opcode.variant.opcode {
-            if self.return_data.is_some() {
-                self.near_calls += 1;
             }
         }
     }
@@ -276,7 +268,7 @@ impl CheatcodeTracer {
     pub fn dispatch_cheatcode<S: std::fmt::Debug + ForkSource, H: HistoryMode>(
         &mut self,
         _state: VmLocalStateData<'_>,
-        _data: BeforeExecutionData,
+        _data: AfterExecutionData,
         _memory: &SimpleMemory<H>,
         storage: StoragePtr<ForkStorageView<S>>,
         call: CheatcodeContractCalls,

@@ -587,7 +587,6 @@ impl CheatcodeTracer {
                 let trimmed_stdout = trimmed_stdout.trim();
                 let encoded_stdout =
                     if let Ok(hex) = hex::decode(trimmed_stdout.trim_start_matches("0x")) {
-                        println!("ES HEX!");
                         hex
                     } else {
                         trimmed_stdout.as_bytes().to_vec()

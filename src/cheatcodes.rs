@@ -326,7 +326,8 @@ impl CheatcodeTracer {
                 };
 
                 let mut mode = CallerMode::None;
-                let mut new_caller = current_origin;
+                let mut new_caller: H256 =
+                    _state.vm_local_state.callstack.current.msg_sender.into();
                 if let Some(prank) = &self.permanent_actions.start_prank {
                     //TODO: vm.prank -> CallerMode::Prank
                     mode = CallerMode::RecurrentPrank;

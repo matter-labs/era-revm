@@ -64,6 +64,7 @@ abigen!(
         function etch(address who, bytes calldata code)
         function getNonce(address account)
         function load(address account, bytes32 slot)
+        function readCallers()
         function readFile(string path)
         function roll(uint256 blockNumber)
         function serializeAddress(string objectKey, string valueKey, address value)
@@ -119,6 +120,16 @@ struct FinishCyclePermanentActions {
 struct StartPrankOpts {
     sender: H160,
     origin: Option<H256>,
+}
+
+#[repr(u8)]
+//discriminants written explicitly to match solidity even if some variants are commented out
+enum CallerMode {
+    None = 0,
+    // Broadcast = 1,
+    // RecurrentBroadcast = 2,
+    // Prank = 3,
+    RecurrentPrank = 4,
 }
 
 impl<S: std::fmt::Debug + ForkSource, H: HistoryMode> DynTracer<ForkStorageView<S>, SimpleMemory<H>>
@@ -299,6 +310,44 @@ impl CheatcodeTracer {
                 let (hash, code) = bytecode_to_factory_dep(code.0.into());
                 self.store_factory_dep(hash, code);
                 self.write_storage(code_key, u256_to_h256(hash), &mut storage.borrow_mut());
+            }
+            ReadCallers(ReadCallersCall) => {
+                tracing::info!("👷 Reading callers");
+
+                //or perhaps
+                // let default_sender = state.vm_local_state.callstack.current.msg_sender;
+                let current_origin = {
+                    let key = StorageKey::new(
+                        AccountTreeId::new(zksync_types::SYSTEM_CONTEXT_ADDRESS),
+                        zksync_types::SYSTEM_CONTEXT_TX_ORIGIN_POSITION,
+                    );
+
+                    storage.borrow_mut().read_value(&key)
+                };
+
+                let mut mode = CallerMode::None;
+                let mut new_caller = current_origin;
+                if let Some(prank) = &self.permanent_actions.start_prank {
+                    //TODO: vm.prank -> CallerMode::Prank
+                    mode = CallerMode::RecurrentPrank;
+                    new_caller = prank.sender.into();
+                }
+                // TODO: vm.broadcast / vm.startBroadcast section
+                // else if let Some(broadcast) = broadcast {
+                //     mode = if broadcast.single_call {
+                //         CallerMode::Broadcast
+                //     } else {
+                //         CallerMode::RecurrentBroadcast
+                //     };
+                //     new_caller = &broadcast.new_origin;
+                //     new_origin = &broadcast.new_origin;
+                // }
+
+                let caller_mode = (mode as u8).into();
+                let message_sender = h256_to_u256(new_caller);
+                let tx_origin = h256_to_u256(current_origin);
+
+                self.return_data = Some(vec![caller_mode, message_sender, tx_origin]);
             }
             GetNonce(GetNonceCall { account }) => {
                 tracing::info!("👷 Getting nonce for {account:?}");

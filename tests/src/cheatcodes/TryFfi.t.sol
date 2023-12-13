@@ -25,18 +25,6 @@ contract FfiTest is Test {
         );
         require(success, "tryFfi failed");
 
-        console.logBytes(data);
-
-        FfiResult memory testF = FfiResult(
-            0,
-            hex"0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000966666920776f726b730000000000000000000000000000000000000000000000",
-            hex""
-        );
-
-        bytes memory encodedOriginal = abi.encode(testF);
-
-        console.logBytes(encodedOriginal);
-
         FfiResult memory f = abi.decode(data, (FfiResult));
         string memory output = abi.decode(f.stdout, (string));
 

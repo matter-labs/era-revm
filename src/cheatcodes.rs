@@ -1,10 +1,14 @@
 use era_test_node::fork::{ForkSource, ForkStorage};
 use era_test_node::utils::bytecode_to_factory_dep;
 use ethers::utils::to_checksum;
-use ethers::{abi::AbiDecode, prelude::abigen};
+use ethers::{
+    abi::{AbiDecode, AbiEncode},
+    prelude::abigen,
+};
 use itertools::Itertools;
 use multivm::interface::dyn_tracers::vm_1_3_3::DynTracer;
 use multivm::interface::tracer::TracerExecutionStatus;
+use multivm::interface::VmRevertReason;
 use multivm::vm_refunds_enhancement::{
     BootloaderState, HistoryMode, SimpleMemory, VmTracer, ZkSyncVmState,
 };
@@ -14,7 +18,9 @@ use multivm::zk_evm_1_3_3::vm_state::PrimitiveValue;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fs;
-use zk_evm::zkevm_opcode_defs::{FatPointer, Opcode, CALL_IMPLICIT_CALLDATA_FAT_PTR_REGISTER};
+use zk_evm::zkevm_opcode_defs::{
+    self, FatPointer, Opcode, CALL_IMPLICIT_CALLDATA_FAT_PTR_REGISTER,
+};
 use zksync_basic_types::{AccountTreeId, Address, H160, H256, U256};
 use zksync_state::{ReadStorage, StoragePtr, StorageView};
 use zksync_types::{
@@ -62,6 +68,9 @@ abigen!(
         function addr(uint256 privateKey)
         function deal(address who, uint256 newBalance)
         function etch(address who, bytes calldata code)
+        function expectRevert()
+        function expectRevert(bytes4 message)
+        function expectRevert(bytes calldata message)
         function getNonce(address account)
         function load(address account, bytes32 slot)
         function readFile(string path)
@@ -90,6 +99,7 @@ abigen!(
 #[derive(Debug, Default, Clone)]
 pub struct CheatcodeTracer {
     one_time_actions: Vec<FinishCycleOneTimeActions>,
+    next_execution_actions: Vec<NextExecutionOneTimeActions>,
     permanent_actions: FinishCyclePermanentActions,
     return_data: Option<Vec<U256>>,
     return_ptr: Option<FatPointer>,
@@ -107,6 +117,20 @@ enum FinishCycleOneTimeActions {
     StoreFactoryDep {
         hash: U256,
         bytecode: Vec<U256>,
+    },
+    ForceRevert {
+        error: Vec<u8>,
+    },
+    ForceReturn {
+        retdata: Vec<u8>,
+    },
+}
+
+#[derive(Debug, Clone)]
+enum NextExecutionOneTimeActions {
+    ExpectRevert {
+        reason: Option<Vec<u8>>,
+        depth: usize,
     },
 }
 
@@ -131,6 +155,37 @@ impl<S: std::fmt::Debug + ForkSource, H: HistoryMode> DynTracer<ForkStorageView<
         memory: &SimpleMemory<H>,
         storage: StoragePtr<ForkStorageView<S>>,
     ) {
+        //Only execute "next execution" actions when a cheatcode isn't being invoked
+        if state.vm_local_state.callstack.current.code_address != CHEATCODE_ADDRESS {
+            // in `handle_action`, when true is returned the current action will
+            // be kept in the queue
+            let handle_action = |action: &NextExecutionOneTimeActions| match action {
+                NextExecutionOneTimeActions::ExpectRevert { reason, depth }
+                    if state.vm_local_state.callstack.depth() > *depth =>
+                {
+                    match data.opcode.variant.opcode {
+                        Opcode::Ret(op) => {
+                            self.one_time_actions.push(
+                                Self::handle_except_revert(reason.as_ref(), op, &state, memory)
+                                    .map(|_| FinishCycleOneTimeActions::ForceReturn {
+                                        //dummy data
+                                        retdata: vec![0u8; 8192],
+                                    })
+                                    .unwrap_or_else(|error| {
+                                        FinishCycleOneTimeActions::ForceRevert { error }
+                                    }),
+                            );
+                            false
+                        }
+                        _ => true,
+                    }
+                }
+                _ => true,
+            };
+
+            self.next_execution_actions.retain(handle_action);
+        }
+
         if self.return_data.is_some() {
             if let Opcode::Ret(_call) = data.opcode.variant.opcode {
                 if self.near_calls == 0 {
@@ -220,6 +275,18 @@ impl<S: std::fmt::Debug + ForkSource, H: HistoryMode> VmTracer<ForkStorageView<S
                         Timestamp(state.local_state.timestamp),
                     )
                 }
+                FinishCycleOneTimeActions::ForceReturn { retdata: _ } => {
+                    //TODO: override return data with the given one and force return (instead of revert)
+                }
+                FinishCycleOneTimeActions::ForceRevert { error } => {
+                    return TracerExecutionStatus::Stop(
+                        multivm::interface::tracer::TracerExecutionStopReason::Abort(
+                            multivm::interface::Halt::Unknown(VmRevertReason::from(
+                                error.as_slice(),
+                            )),
+                        ),
+                    );
+                }
             }
         }
 
@@ -262,6 +329,7 @@ impl CheatcodeTracer {
             return_data: None,
             return_ptr: None,
             serialized_objects: HashMap::new(),
+            next_execution_actions: vec![],
         }
     }
 
@@ -300,6 +368,17 @@ impl CheatcodeTracer {
                 self.store_factory_dep(hash, code);
                 self.write_storage(code_key, u256_to_h256(hash), &mut storage.borrow_mut());
             }
+            ExpectRevert0(ExpectRevert0Call) => {
+                self.add_except_revert(None, _state.vm_local_state.callstack.depth())
+            }
+            ExpectRevert1(ExpectRevert1Call { message }) => self.add_except_revert(
+                Some(message.to_vec()),
+                _state.vm_local_state.callstack.depth(),
+            ),
+            ExpectRevert2(ExpectRevert2Call { message }) => self.add_except_revert(
+                Some(message.to_vec()),
+                _state.vm_local_state.callstack.depth(),
+            ),
             GetNonce(GetNonceCall { account }) => {
                 tracing::info!("👷 Getting nonce for {account:?}");
                 let mut storage = storage.borrow_mut();
@@ -635,5 +714,75 @@ impl CheatcodeTracer {
         data.push(data_length.into());
 
         self.return_data = Some(data);
+    }
+
+    fn add_except_revert(&mut self, reason: Option<Vec<u8>>, depth: usize) {
+        self.next_execution_actions
+            .push(NextExecutionOneTimeActions::ExpectRevert { reason, depth });
+    }
+
+    fn handle_except_revert<H: HistoryMode>(
+        reason: Option<&Vec<u8>>,
+        op: zkevm_opcode_defs::RetOpcode,
+        state: &VmLocalStateData<'_>,
+        memory: &SimpleMemory<H>,
+    ) -> Result<(), Vec<u8>> {
+        match (op, reason) {
+            (zkevm_opcode_defs::RetOpcode::Revert, Some(expected_reason)) => {
+                let retdata = {
+                    let ptr = state.vm_local_state.registers
+                        [CALL_IMPLICIT_CALLDATA_FAT_PTR_REGISTER as usize];
+                    assert!(ptr.is_pointer);
+                    let fat_data_pointer = FatPointer::from_u256(ptr.value);
+                    memory.read_unaligned_bytes(
+                        fat_data_pointer.memory_page as usize,
+                        fat_data_pointer.start as usize,
+                        fat_data_pointer.length as usize,
+                    )
+                };
+
+                if !expected_reason.is_empty() && retdata.is_empty() {
+                    return Err("call reverted as expected, but without data"
+                        .to_string()
+                        .into());
+                }
+
+                let mut actual_revert: Vec<u8> = retdata.into();
+
+                // Try decoding as known errors
+                // alloy_sol_types::Revert = "Error(string)" => [0x08, 0xc3, 0x79, 0xa0]
+                // CheatCodeError = "CheatcodeError(string)" => [0xee, 0xaa, 0x9e, 0x6f]
+                if matches!(
+                    actual_revert.get(..4),
+                    Some(&[0x08, 0xc3, 0x79, 0xa0] | &[0xee, 0xaa, 0x9e, 0x6f])
+                ) {
+                    if let Ok(decoded) = Vec::<u8>::decode(&actual_revert[4..]) {
+                        actual_revert = decoded;
+                    }
+                }
+
+                if &actual_revert == expected_reason {
+                    Ok(())
+                } else {
+                    let stringify = |data: &[u8]| {
+                        String::decode(data)
+                            .ok()
+                            .or_else(|| std::str::from_utf8(data).ok().map(ToOwned::to_owned))
+                            .unwrap_or_else(|| data.to_vec().encode_hex())
+                    };
+                    Err(format!(
+                        "Error != expected error: {} != {}",
+                        stringify(&actual_revert),
+                        stringify(expected_reason),
+                    )
+                    .into())
+                }
+            }
+            (zkevm_opcode_defs::RetOpcode::Revert, None) => Ok(()),
+            (zkevm_opcode_defs::RetOpcode::Ok, _) => {
+                Err("expected revert but call succeeded".to_string().into())
+            }
+            (zkevm_opcode_defs::RetOpcode::Panic, _) => todo!("ignore/return error ?"),
+        }
     }
 }

@@ -1,5 +1,6 @@
 use era_test_node::fork::{ForkSource, ForkStorage};
 use era_test_node::utils::bytecode_to_factory_dep;
+use ethers::abi::AbiEncode;
 use ethers::utils::to_checksum;
 use ethers::{abi::AbiDecode, prelude::abigen};
 use itertools::Itertools;
@@ -14,6 +15,7 @@ use multivm::zk_evm_1_3_3::vm_state::PrimitiveValue;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fs;
+use std::process::Command;
 use zk_evm::zkevm_opcode_defs::{FatPointer, Opcode, CALL_IMPLICIT_CALLDATA_FAT_PTR_REGISTER};
 use zksync_basic_types::{AccountTreeId, Address, H160, H256, U256};
 use zksync_state::{ReadStorage, StoragePtr, StorageView};
@@ -62,6 +64,7 @@ abigen!(
         function addr(uint256 privateKey)
         function deal(address who, uint256 newBalance)
         function etch(address who, bytes calldata code)
+        function ffi(string[] args)
         function getNonce(address account)
         function load(address account, bytes32 slot)
         function readCallers()
@@ -81,10 +84,12 @@ abigen!(
         function toString(int256 value)
         function toString(bytes32 value)
         function toString(bytes value)
+        function tryFfi(string[] args)
         function warp(uint256 timestamp)
         function writeFile(string path, string value)
         function writeJson(string json, string path)
         function writeJson(string json, string path, string valueKey)
+        struct FfiResult { int32 exitCode; bytes stdout; bytes stderr }
     ]"#
 );
 
@@ -350,6 +355,34 @@ impl CheatcodeTracer {
 
                 self.return_data = Some(vec![caller_mode, message_sender, tx_origin]);
             }
+            Ffi(FfiCall { args }) => {
+                tracing::info!("👷 Running ffi: {args:?}");
+                let Some(first_arg) = args.get(0) else {
+                    tracing::error!("Failed to run ffi: no args");
+                    return;
+                };
+                // TODO: set directory to root
+                let Ok(output) = Command::new(first_arg).args(&args[1..]).output() else {
+                    tracing::error!("Failed to run ffi");
+                    return;
+                };
+
+                // The stdout might be encoded on valid hex, or it might just be a string,
+                // so we need to determine which it is to avoid improperly encoding later.
+                let Ok(trimmed_stdout) = String::from_utf8(output.stdout) else {
+                    tracing::error!("Failed to parse ffi output");
+                    return;
+                };
+                let trimmed_stdout = trimmed_stdout.trim();
+                let encoded_stdout =
+                    if let Ok(hex) = hex::decode(trimmed_stdout.trim_start_matches("0x")) {
+                        hex
+                    } else {
+                        trimmed_stdout.as_bytes().to_vec()
+                    };
+
+                self.add_trimmed_return_data(&encoded_stdout);
+            }
             GetNonce(GetNonceCall { account }) => {
                 tracing::info!("👷 Getting nonce for {account:?}");
                 let mut storage = storage.borrow_mut();
@@ -582,6 +615,48 @@ impl CheatcodeTracer {
                 tracing::info!("Converting bytes into string");
                 let bytes_value = format!("0x{}", hex::encode(value));
                 self.add_trimmed_return_data(bytes_value.as_bytes());
+            }
+            TryFfi(TryFfiCall { args }) => {
+                tracing::info!("👷 Running try ffi: {args:?}");
+                let Some(first_arg) = args.get(0) else {
+                    tracing::error!("Failed to run ffi: no args");
+                    return;
+                };
+                // TODO: set directory to root
+                let Ok(output) = Command::new(first_arg).args(&args[1..]).output() else {
+                    tracing::error!("Failed to run ffi");
+                    return;
+                };
+
+                // The stdout might be encoded on valid hex, or it might just be a string,
+                // so we need to determine which it is to avoid improperly encoding later.
+                let Ok(trimmed_stdout) = String::from_utf8(output.stdout) else {
+                    tracing::error!("Failed to parse ffi output");
+                    return;
+                };
+                let trimmed_stdout = trimmed_stdout.trim();
+                let encoded_stdout =
+                    if let Ok(hex) = hex::decode(trimmed_stdout.trim_start_matches("0x")) {
+                        hex
+                    } else {
+                        trimmed_stdout.as_bytes().to_vec()
+                    };
+
+                let ffi_result = FfiResult {
+                    exit_code: output.status.code().unwrap_or(69), // Default from foundry
+                    stdout: encoded_stdout.into(),
+                    stderr: output.stderr.into(),
+                };
+                let encoded_ffi_result: Vec<u8> = ffi_result.encode();
+
+                // Add 32 bytes initial offset with 0x20 to the return data
+                // See: https://github.com/gakonst/ethers-rs/issues/2514
+                let mut return_data = vec![0u8; 32];
+                return_data[31] = 0x20;
+                return_data.extend(encoded_ffi_result);
+
+                let return_data: Vec<U256> = return_data.chunks(32).map(|b| b.into()).collect_vec();
+                self.return_data = Some(return_data);
             }
             Warp(WarpCall { timestamp }) => {
                 tracing::info!("👷 Setting block timestamp {}", timestamp);

@@ -1,5 +1,6 @@
 use era_test_node::fork::{ForkSource, ForkStorage};
 use era_test_node::utils::bytecode_to_factory_dep;
+use ethers::abi::AbiEncode;
 use ethers::utils::to_checksum;
 use ethers::{abi::AbiDecode, prelude::abigen};
 use itertools::Itertools;
@@ -11,7 +12,8 @@ use multivm::vm_refunds_enhancement::{
 use multivm::zk_evm_1_3_1::zkevm_opcode_defs::RET_IMPLICIT_RETURNDATA_PARAMS_REGISTER;
 use multivm::zk_evm_1_3_3::tracing::{BeforeExecutionData, VmLocalStateData};
 use multivm::zk_evm_1_3_3::vm_state::PrimitiveValue;
-use std::collections::HashMap;
+use serde::Serialize;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use zk_evm::zkevm_opcode_defs::{FatPointer, Opcode, CALL_IMPLICIT_CALLDATA_FAT_PTR_REGISTER};
 use zksync_basic_types::{AccountTreeId, Address, H160, H256, U256};
@@ -22,7 +24,7 @@ use zksync_types::{
     utils::{decompose_full_nonce, nonces_to_full_nonce, storage_key_for_eth_balance},
     StorageKey,
 };
-use zksync_types::{LogQuery, Timestamp};
+use zksync_types::{EventMessage, LogQuery, Timestamp};
 use zksync_utils::{h256_to_u256, u256_to_h256};
 
 // address(uint160(uint256(keccak256('hevm cheat code'))))
@@ -62,7 +64,9 @@ abigen!(
         function deal(address who, uint256 newBalance)
         function etch(address who, bytes calldata code)
         function getNonce(address account)
+        function getRecordedLogs()
         function load(address account, bytes32 slot)
+        function recordLogs()
         function roll(uint256 blockNumber)
         function serializeAddress(string objectKey, string valueKey, address value)
         function serializeBool(string objectKey, string valueKey, bool value)
@@ -79,6 +83,7 @@ abigen!(
         function toString(bytes32 value)
         function toString(bytes value)
         function warp(uint256 timestamp)
+        struct Log { bytes32[] topics; bytes data; address emitter }
     ]"#
 );
 
@@ -90,6 +95,26 @@ pub struct CheatcodeTracer {
     return_ptr: Option<FatPointer>,
     near_calls: usize,
     serialized_objects: HashMap<String, String>,
+    recorded_logs: HashSet<LogEntry>,
+    recording_logs: bool,
+    recording_timestamp: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Eq, Hash, PartialEq)]
+struct LogEntry {
+    topic: H256,
+    data: H256,
+    emitter: H160,
+}
+
+impl LogEntry {
+    fn new(topic: H256, data: H256, emitter: H160) -> Self {
+        LogEntry {
+            topic,
+            data,
+            emitter,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -196,6 +221,26 @@ impl<S: std::fmt::Debug + ForkSource, H: HistoryMode> VmTracer<ForkStorageView<S
         state: &mut ZkSyncVmState<ForkStorageView<S>, H>,
         _bootloader_state: &mut BootloaderState,
     ) -> TracerExecutionStatus {
+        let emitter = state.local_state.callstack.current.this_address;
+        if self.recording_logs {
+            let logs = transform_to_logs(
+                state
+                    .event_sink
+                    .get_events_and_l2_l1_logs_after_timestamp(Timestamp(self.recording_timestamp))
+                    .0,
+                emitter,
+            );
+            if !logs.is_empty() {
+                let mut unique_set: HashSet<LogEntry> = HashSet::new();
+
+                // Filter out duplicates and extend the unique entries to the vector
+                self.recorded_logs.extend(
+                    logs.into_iter()
+                        .filter(|log| unique_set.insert(log.clone())),
+                );
+            }
+        }
+
         while let Some(action) = self.one_time_actions.pop() {
             match action {
                 FinishCycleOneTimeActions::StorageWrite {
@@ -265,12 +310,15 @@ impl CheatcodeTracer {
             return_data: None,
             return_ptr: None,
             serialized_objects: HashMap::new(),
+            recorded_logs: HashSet::new(),
+            recording_logs: false,
+            recording_timestamp: 0,
         }
     }
 
     pub fn dispatch_cheatcode<S: std::fmt::Debug + ForkSource, H: HistoryMode>(
         &mut self,
-        _state: VmLocalStateData<'_>,
+        state: VmLocalStateData<'_>,
         _data: BeforeExecutionData,
         _memory: &SimpleMemory<H>,
         storage: StoragePtr<ForkStorageView<S>>,
@@ -318,6 +366,25 @@ impl CheatcodeTracer {
                 tracing::info!("👷 Returndata is {:?}", account_nonce);
                 self.return_data = Some(vec![account_nonce]);
             }
+            GetRecordedLogs(GetRecordedLogsCall) => {
+                tracing::info!("👷 Getting recorded logs");
+                let log_vector = self.recorded_logs.iter().map(|log| {
+                    Log {
+                        topics: vec![log.topic.into()],
+                        data: log.data.to_fixed_bytes().into(),
+                        emitter: log.emitter,
+                    }
+                    .encode();
+                });
+
+                println!("👷 Logs are {:?}", log_vector);
+                //TODO: return logs as returndata
+
+                //clean up logs
+                self.recorded_logs = HashSet::new();
+                //disable flag of recording logs
+                self.recording_logs = false;
+            }
             Load(LoadCall { account, slot }) => {
                 tracing::info!(
                     "👷 Getting storage slot {:?} for account {:?}",
@@ -328,6 +395,16 @@ impl CheatcodeTracer {
                 let mut storage = storage.borrow_mut();
                 let value = storage.read_value(&key);
                 self.return_data = Some(vec![h256_to_u256(value)]);
+            }
+            RecordLogs(RecordLogsCall) => {
+                tracing::info!("👷 Recording logs");
+                tracing::info!(
+                    "👷 Logs will be with the timestamp {}",
+                    state.vm_local_state.timestamp
+                );
+
+                self.recording_timestamp = state.vm_local_state.timestamp;
+                self.recording_logs = true;
             }
             Roll(RollCall { block_number }) => {
                 tracing::info!("👷 Setting block number to {}", block_number);
@@ -583,4 +660,18 @@ impl CheatcodeTracer {
 
         self.return_data = Some(data);
     }
+}
+
+fn transform_to_logs(events: Vec<EventMessage>, emitter: H160) -> Vec<LogEntry> {
+    events
+        .iter()
+        .filter(|event| event.address == zksync_types::EVENT_WRITER_ADDRESS)
+        .map(|event| {
+            LogEntry::new(
+                u256_to_h256(event.key),
+                u256_to_h256(event.value),
+                H160::from(emitter),
+            )
+        })
+        .collect()
 }
